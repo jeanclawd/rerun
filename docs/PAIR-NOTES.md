@@ -2,8 +2,8 @@
 
 *2026-08-23. Working notes toward a marimo-pair-like agent integration for
 ReRun: an agent CLI (Claude Code first) collaborating on a live reactive
-MATLAB notebook. Nothing here is built yet; issues will be cut from the
-"proposal" section once the shape settles.*
+MATLAB notebook. One thing IS built: the pair-over-MCP prototype of §7
+(`pair/mcp/`, 9/9 e2e). Issues will be cut from §9 once Yann picks an MVP.*
 
 ---
 
