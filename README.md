@@ -55,9 +55,12 @@ cached, shared with the streamlab player so browsers download it once).
 
 ### RunMat 0.6.1 quirks this design absorbs
 
-- *Every exec replaces all script-defined functions* → the sources of all
-  function cells are appended to every exec (the streamlab library trick), so
-  editing a function propagates exactly like editing data.
+- *Function defs riding along with a script make RunMat echo suppressed
+  assignments, and a pure-function-file exec wipes the workspace* (both probed
+  live) → function cells are installed by a separate exec guarded with
+  `if false, end`; ordinary cells run bare. Installed functions persist until
+  the next exec that contains function defs, so one install per library edit
+  suffices.
 - *Figure scenes reference live workspace variables* → figures are exported at
   the end of the exec that touched them, while their variables are alive.
 - *`global` is broken* → irrelevant here; the graph is the state channel.

@@ -8,9 +8,9 @@
  * the variable is cleared from the workspace before anything reruns, so
  * downstream cells fail honestly instead of feeding on ghosts.
  *
- * RunMat 0.6.1 quirk this leans into: every exec replaces ALL script-defined
- * functions, so the sources of all function cells are appended to every exec
- * (the streamlab library trick) — function edits propagate like data edits.
+ * Function cells are installed by a separate guarded exec (see ensureLibrary)
+ * because RunMat 0.6.1 misbehaves when function defs ride along with a script
+ * — details at the ensureLibrary comment.
  */
 
 import { buildGraph } from './dag.js';
@@ -202,8 +202,17 @@ function enqueue(job) {
   return runChain;
 }
 
-/** The sources every exec must carry so script functions survive (RunMat
- *  replaces all script-defined functions on each exec). */
+/* Function cells are installed by a separate, guarded exec — two RunMat 0.6.1
+ * quirks force this shape (probed live, both absent from plain execs):
+ *   - a source that appends function defs to a script ECHOES suppressed
+ *     assignments (`x = 1;` prints anyway)
+ *   - a source that is ONLY function defs is treated as a function file and
+ *     WIPES the workspace
+ * So: `if false, end` makes the library exec a script (no wipe, no echo), and
+ * ordinary cells run bare. Functions persist across plain execs; only an exec
+ * containing function defs replaces the installed set. */
+let installedLib = null;
+
 function functionLibrary() {
   return cells
     .filter((c) => graph.nodes.get(c.id)?.isFunctionCell)
@@ -211,18 +220,30 @@ function functionLibrary() {
     .join('\n\n');
 }
 
+async function ensureLibrary() {
+  const lib = functionLibrary();
+  if (lib === installedLib) return null;
+  const code = lib
+    ? `if false, end\n\n${lib}`
+    : 'if false, end\n\nfunction __rerun_noop__()\nend'; // replace set with a stub
+  const r = await runner.exec(code, { name: '<functions>' });
+  installedLib = r.error ? null : lib;
+  return r.error;
+}
+
 async function runIds(ids) {
   const order = graph.order.filter((x) => ids.includes(x));
   for (const id of order) setStatus(id, 'queued');
+  const libError = await ensureLibrary();
   for (const id of order) {
     if (!cells.some((c) => c.id === id)) continue; // deleted mid-queue
-    await runOne(id);
+    await runOne(id, libError);
   }
   refreshVariables();
   status('idle');
 }
 
-async function runOne(id) {
+async function runOne(id, libError = null) {
   const c = cells.find((x) => x.id === id);
   const m = meta.get(id);
   const n = graph.nodes.get(id);
@@ -231,6 +252,19 @@ async function runOne(id) {
   setStatus(id, 'running');
   status(`running cell ${cells.indexOf(c) + 1}…`);
   m.out.innerHTML = '';
+
+  if (n.isFunctionCell) {
+    // installed (or refused) by ensureLibrary before this loop
+    if (libError) {
+      m.out.appendChild(div('run-error', `${libError.identifier ?? 'error'}: ${libError.message}`));
+      setStatus(id, 'error');
+    } else {
+      setStatus(id, 'ok', 'defined');
+    }
+    m.prevDefs = new Set(n.defs);
+    return;
+  }
+
   const pre = document.createElement('pre');
   pre.className = 'stdout';
   m.out.appendChild(pre);
@@ -239,9 +273,7 @@ async function runOne(id) {
   const gone = [...m.prevDefs].filter((v) => !n.defs.has(v));
   const clearStmt = gone.length ? `clear ${gone.join(' ')};\n` : '';
 
-  const lib = functionLibrary();
-  const body = n.isFunctionCell ? '% (function definitions)' : c.source;
-  const code = `${clearStmt}${body}\n\n${lib}`;
+  const code = `${clearStmt}${c.source}`;
 
   streamTarget = id;
   const r = await runner.exec(code, {
@@ -367,6 +399,7 @@ function importM(text) {
   enqueue(async () => {
     await session.resetSession();
     runner.clear();
+    installedLib = null;
     await runIds(graph.order);
   });
 }
@@ -392,6 +425,7 @@ $('reset').addEventListener('click', () => {
   enqueue(async () => {
     await session.resetSession();
     runner.clear();
+    installedLib = null;
     await runIds(graph.order);
   });
 });
