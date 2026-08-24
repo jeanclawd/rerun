@@ -77,6 +77,37 @@ node test/dag.test.mjs
 ./deploy.sh   # version-stamps assets into /opt/sites/rerun (Cloudflare-safe)
 ```
 
+## Pair (`hold on`) — agents on the notebook
+
+An agent (Claude Code, Codex, opencode, Cursor — anything MCP) can pair with a
+notebook through `pair/mcp/server.mjs`, an MCP stdio server with marimo-pair
+semantics: `exec` (scratchpad in the live session, traceless, can't steal
+notebook-owned names) and `apply` (transactional cell batches, validated
+against the DAG before anything runs, reactive rerun + per-cell report), plus
+`notebook`, `read_variable`, `read_figure`, `export_m`.
+
+Two modes:
+
+- **Headless** — `node pair/mcp/server.mjs --notebook nb.rerun.m`: the server
+  owns a private session; the file is loaded/replayed on start and saved after
+  every apply. Registered for this repo in `.mcp.json`.
+- **Live tab** — click **pair** in the ReRun header, hand the shown command
+  (`--relay wss://…/rerun/pair --session … --token …`) to the agent: every
+  tool call executes in YOUR tab, live — cells appear, plots redraw, and the
+  pair button is the kill switch. The relay (`relay/relay.mjs`, systemd
+  `rerun-pair-relay`, Caddy `/rerun/pair`) is a dumb token-gated pipe.
+
+Design notes and the research behind this: `docs/PAIR-NOTES.md`.
+
+## File format (`.rerun.m`)
+
+A notebook is a valid MATLAB script: `%%` sections in dependency order
+(function cells last, as MATLAB requires), so it runs top-to-bottom anywhere.
+Round-trip metadata rides in comments — `%% ⟳ <id>` headers and a
+`% ⟳ page-order:` footer — so ReRun restores the page layout exactly and git
+diffs show one hunk per edited cell. Plain `%%`-sectioned files import fine.
+Implementation: `host/format.js`, shared by the app and the pair server.
+
 ## Status / limits (v0.1)
 
 - Analyzer is lexical, not a parser: strings/comments/transpose handled,

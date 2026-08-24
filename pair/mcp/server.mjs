@@ -22,11 +22,26 @@
  */
 
 import { createInterface } from 'node:readline';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildGraph } from '../../host/dag.js';
 import { SessionRunner } from '../../host/session-core.mjs';
+import { exportNotebook, parseNotebook } from '../../host/format.js';
+
+/* ---------------------------------------------------------------- CLI args
+ * headless (default):  server.mjs [--notebook nb.rerun.m]
+ * relay bridge:        server.mjs --relay wss://…/rerun/pair --session S --token T
+ * In bridge mode there is no local session: every tool call is forwarded to
+ * the paired browser tab, which executes in ITS live session — the human
+ * watches the agent work. */
+const ARGS = {};
+for (let i = 2; i < process.argv.length; i++) {
+  const a = process.argv[i];
+  if (a.startsWith('--')) ARGS[a.slice(2)] = process.argv[i + 1]?.startsWith('--') ? true : process.argv[++i];
+}
+const BRIDGE = !!ARGS.relay;
 
 /* ------------------------------------------------------- session bootstrap */
 globalThis.self ??= globalThis;
@@ -37,20 +52,33 @@ if (!globalThis.crypto?.getRandomValues) globalThis.crypto = (await import('node
 console.log = (...a) => console.error(...a); // stdout is protocol-only
 console.info = (...a) => console.error(...a);
 
-const PKG = process.env.RUNMAT_PKG ??
-  '/root/Projects/runmat-jupyter/host/node_modules/runmat/dist/pkg-web';
-const web = await import(pathToFileURL(resolve(PKG, 'runmat_wasm_web.js')).href);
-await web.default({ module_or_path: await readFile(resolve(PKG, 'runmat_wasm_web_bg.wasm')) });
-const session = await web.initRunMat({
-  enableGpu: false, enableJit: false, telemetryConsent: false,
-  logLevel: 'error', language: { compat: 'matlab' },
-});
-const runner = new SessionRunner(session, { figureWidth: 640, figureHeight: 400 });
-try { await web.subscribeStdout((e) => runner.feedStdout(e)); } catch { /* results carry stdout */ }
+let session = null;
+let runner = null;
+if (!BRIDGE) {
+  const PKG = process.env.RUNMAT_PKG ??
+    '/root/Projects/runmat-jupyter/host/node_modules/runmat/dist/pkg-web';
+  const web = await import(pathToFileURL(resolve(PKG, 'runmat_wasm_web.js')).href);
+  await web.default({ module_or_path: await readFile(resolve(PKG, 'runmat_wasm_web_bg.wasm')) });
+  session = await web.initRunMat({
+    enableGpu: false, enableJit: false, telemetryConsent: false,
+    logLevel: 'error', language: { compat: 'matlab' },
+  });
+  runner = new SessionRunner(session, { figureWidth: 640, figureHeight: 400 });
+  try { await web.subscribeStdout((e) => runner.feedStdout(e)); } catch { /* results carry stdout */ }
+}
 
 /* ------------------------------------------------------------- notebook */
 let cells = [];                    // [{id, source}] page order
 let graph = buildGraph(cells);
+const cellFigures = new Map();     // id -> [svg] from the cell's last run
+const NB_FILE = ARGS.notebook ? resolve(String(ARGS.notebook)) : null;
+if (!BRIDGE && NB_FILE && existsSync(NB_FILE)) {
+  cells = parseNotebook(await readFile(NB_FILE, 'utf8'));
+  graph = buildGraph(cells);
+}
+async function persist() {
+  if (NB_FILE) await writeFile(NB_FILE, exportNotebook(cells, graph));
+}
 const prevDefs = new Map();        // id -> Set(names) for no-hidden-state clears
 let installedLib = null;
 let seq = 0;
@@ -87,6 +115,7 @@ async function runCell(id) {
   const clearStmt = gone.length ? `clear ${gone.join(' ')};\n` : '';
   const r = await runner.exec(`${clearStmt}${c.source}`, { name: `<${id}>` });
   prevDefs.set(id, new Set(n.defs));
+  cellFigures.set(id, (r.figures ?? []).filter((f) => f.svg).map((f) => f.svg));
   return {
     id,
     status: r.error ? 'error' : 'ok',
@@ -177,8 +206,17 @@ const TOOLS = [
     },
   },
   {
+    name: 'read_figure',
+    description: "SVG of the figure(s) a cell produced on its last run.",
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'cell id' } },
+      required: ['id'],
+    },
+  },
+  {
     name: 'export_m',
-    description: 'The notebook as a plain MATLAB script: %% sections in dependency order, function cells last. Runs top-to-bottom in any MATLAB.',
+    description: 'The notebook as a plain MATLAB script: %% ⟳-tagged sections in dependency order, function cells last, page-order footer. Runs top-to-bottom in any MATLAB; re-imports into ReRun exactly.',
     inputSchema: { type: 'object', properties: {} },
   },
 ];
@@ -191,10 +229,16 @@ const handlers = {
     const probe = buildGraph([...cells, { id: '__pad__', source: String(code) }]);
     const clash = probe.errors.get('__pad__');
     if (clash?.length) return { refused: clash };
-    const r = await runner.exec(String(code), { name: '<scratch>' });
+    let streamed = '';
+    const r = await runner.exec(String(code), {
+      name: '<scratch>', onStream: ({ text }) => { streamed += text; },
+    });
+    const displayLines = (r.displays ?? [])
+      .map((d) => (d.label ? `${d.label} = ${d.text}` : d.text))
+      .filter((x) => x && !streamed.includes(String(x).trim()));
     return {
       ok: !r.error,
-      stdout: (r.displays ?? []).map((d) => (d.label ? `${d.label} = ${d.text}` : d.text)).join('\n'),
+      stdout: (streamed + displayLines.join('\n')).trim(),
       figures: (r.figures ?? []).filter((f) => f.svg).length,
       error: r.error ? `${r.error.identifier ?? r.error.kind}: ${r.error.message}` : undefined,
       workspace: runner.workspace().map((v) => v.name),
@@ -252,7 +296,14 @@ const handlers = {
       await runner.exec(`clear ${deletedDefs.join(' ')};`, { name: '<clear>' });
     }
     const report = await runInOrder([...affected].filter((id) => cells.some((c) => c.id === id)));
+    await persist();
     return { applied: ops.length, report, executionOrder: graph.order };
+  },
+
+  async read_figure({ id }) {
+    const svgs = cellFigures.get(String(id));
+    if (!svgs) return { error: `no figures recorded for cell '${id}'` };
+    return { id, count: svgs.length, svgs };
   },
 
   async read_variable({ name, maxElements = 100 }) {
@@ -266,17 +317,62 @@ const handlers = {
   },
 
   async export_m() {
-    const script = graph.order
-      .filter((id) => !graph.nodes.get(id).isFunctionCell)
-      .map((id, i) => `%% cell ${i + 1}\n${cells.find((c) => c.id === id).source}`)
-      .join('\n\n');
-    const fns = graph.order
-      .filter((id) => graph.nodes.get(id).isFunctionCell)
-      .map((id) => cells.find((c) => c.id === id).source)
-      .join('\n\n');
-    return { source: `% exported by ReRun pair\n\n${script}${fns ? '\n\n' + fns : ''}\n` };
+    return { source: exportNotebook(cells, graph), file: NB_FILE ?? undefined };
   },
 };
+
+/* -------------------------------------------------------------- bridge mode
+ * Forward every tool call over the relay to the paired browser tab. Node 22's
+ * native WebSocket client — no dependency. */
+let tabCall = null;
+if (BRIDGE) {
+  if (!ARGS.session || !ARGS.token) {
+    console.error('bridge mode needs --session and --token (shown in the ReRun tab header)');
+    process.exit(2);
+  }
+  const ws = new WebSocket(String(ARGS.relay));
+  const pendingTab = new Map();
+  let wsSeq = 0;
+  const ready = new Promise((res, rej) => {
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ role: 'agent', session: ARGS.session, token: ARGS.token }));
+    };
+    ws.onmessage = (ev) => {
+      let m;
+      try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.type === 'registered') { res(); return; }
+      if (m.type === 'refused') { rej(new Error(m.reason)); return; }
+      if (m.type === 'tab-gone') {
+        for (const [, cb] of pendingTab) cb({ error: 'the paired tab disconnected' });
+        pendingTab.clear();
+        return;
+      }
+      if (m.id !== undefined && pendingTab.has(m.id)) {
+        pendingTab.get(m.id)(m.result ?? { error: m.error ?? 'empty reply' });
+        pendingTab.delete(m.id);
+      }
+    };
+    ws.onerror = () => rej(new Error(`cannot reach relay ${ARGS.relay}`));
+    ws.onclose = () => rej(new Error('relay connection closed'));
+  });
+  await ready;
+  console.error(`bridged to tab (session ${ARGS.session})`);
+  tabCall = (name, args) => new Promise((res) => {
+    const id = ++wsSeq;
+    pendingTab.set(id, res);
+    setTimeout(() => {
+      if (pendingTab.delete(id)) res({ error: `tab did not answer '${name}' within 120s` });
+    }, 120_000);
+    ws.send(JSON.stringify({ id, type: 'tool', name, args }));
+  });
+}
+
+// headless with a loaded notebook: bring the workspace up to the file
+if (!BRIDGE && cells.length) {
+  const report = await runInOrder(graph.order);
+  console.error(`notebook loaded: ${cells.length} cells, ` +
+    `${report.filter((r) => r.status === 'ok').length} ok`);
+}
 
 /* ----------------------------------------------------------- MCP plumbing */
 const emit = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
@@ -309,8 +405,12 @@ async function handle(msg) {
     const { name, arguments: args } = params ?? {};
     let result;
     try {
-      const fn = handlers[name];
-      result = fn ? await fn(args ?? {}) : { error: `unknown tool '${name}'` };
+      if (tabCall) {
+        result = await tabCall(name, args ?? {});
+      } else {
+        const fn = handlers[name];
+        result = fn ? await fn(args ?? {}) : { error: `unknown tool '${name}'` };
+      }
     } catch (e) {
       result = { error: String(e?.message ?? e) };
     }
