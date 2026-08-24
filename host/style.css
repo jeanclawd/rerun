@@ -235,3 +235,6 @@ main {
   background: var(--panel); color: var(--ink); border: 1px solid var(--edge);
   border-radius: 6px; padding: 0.15rem 0.6rem; cursor: pointer; font-size: 0.75rem;
 }
+#pair-banner details { flex-basis: 100%; }
+#pair-banner summary { cursor: pointer; font-size: 0.75rem; }
+#pair-banner details code { margin: 0.3rem 0.5rem 0 0; display: inline-block; }

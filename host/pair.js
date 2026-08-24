@@ -34,19 +34,36 @@ export function initPair(api) {
 
   function showBanner(sessionId, token) {
     banner.innerHTML = '';
-    const label = document.createElement('span');
-    label.textContent = 'hand this to your agent: ';
-    const code = document.createElement('code');
     const relay = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${RELAY_PATH}`;
-    code.textContent =
-      `node pair/mcp/server.mjs --relay ${relay} --session ${sessionId} --token ${token}`;
-    const copy = document.createElement('button');
-    copy.textContent = 'copy';
-    copy.addEventListener('click', async () => {
-      try { await navigator.clipboard.writeText(code.textContent); copy.textContent = 'copied'; }
-      catch { /* selection fallback: it's visible */ }
+
+    const label = document.createElement('span');
+    label.textContent = 'tell your agent to pair with ';
+    const short = document.createElement('code');
+    short.textContent = `session ${sessionId} · token ${token}`;
+    const copyShort = document.createElement('button');
+    copyShort.textContent = 'copy';
+    copyShort.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(`pair with my ReRun notebook: session ${sessionId}, token ${token}`);
+        copyShort.textContent = 'copied';
+      } catch { /* it's visible, select it */ }
     });
-    banner.append(label, code, copy);
+
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = 'MCP config for Claude Code / Codex / Cursor';
+    const code = document.createElement('code');
+    code.textContent =
+      `claude mcp add rerun-pair -- node pair/mcp/server.mjs --relay ${relay} --session ${sessionId} --token ${token}`;
+    const copyFull = document.createElement('button');
+    copyFull.textContent = 'copy';
+    copyFull.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(code.textContent); copyFull.textContent = 'copied'; }
+      catch { /* visible */ }
+    });
+    details.append(summary, code, copyFull);
+
+    banner.append(label, short, copyShort, details);
     banner.hidden = false;
   }
 
