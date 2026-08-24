@@ -10,7 +10,7 @@ DEST=/opt/sites/rerun
 mkdir -p "$DEST"
 
 sed "s/__V__/$V/g" host/index.html > "$DEST/index.html"
-cp host/style.css host/app.js host/dag.js host/session-core.mjs host/figrender.mjs "$DEST/"
+cp host/style.css host/app.js host/dag.js host/format.js host/pair.js host/session-core.mjs host/figrender.mjs "$DEST/"
 cp -r examples "$DEST/" 2>/dev/null || true
 chmod -R a+rX "$DEST"
 echo "deployed rerun @ v=$V"

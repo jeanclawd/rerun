@@ -21,9 +21,11 @@
       <button id="export" title="download as a plain .m that runs top-to-bottom">export .m</button>
       <label class="file-btn">import<input type="file" id="import" accept=".m,text/plain" hidden></label>
       <button id="reset" title="restore the demo notebook">demo</button>
+      <button id="pair" title="let an agent drive this notebook while you watch">pair</button>
     </nav>
     <span id="status">booting…</span>
   </header>
+  <div id="pair-banner" hidden></div>
 
   <main>
     <div id="cells" class="cells"></div>

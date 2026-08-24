@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "rerun-pair": {
+      "command": "node",
+      "args": ["pair/mcp/server.mjs", "--notebook", "notebook.rerun.m"]
+    }
+  }
+}

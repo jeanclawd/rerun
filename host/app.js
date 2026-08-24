@@ -15,6 +15,7 @@
 
 import { buildGraph } from './dag.js';
 import { SessionRunner } from './session-core.mjs';
+import { exportNotebook, parseNotebook } from './format.js';
 
 const $ = (id) => document.getElementById(id);
 const RUNTIME = '/streamlab/runtime'; // shared 52 MB wasm build, same origin
@@ -235,19 +236,24 @@ async function runIds(ids) {
   const order = graph.order.filter((x) => ids.includes(x));
   for (const id of order) setStatus(id, 'queued');
   const libError = await ensureLibrary();
+  const report = [];
   for (const id of order) {
     if (!cells.some((c) => c.id === id)) continue; // deleted mid-queue
-    await runOne(id, libError);
+    report.push(await runOne(id, libError));
   }
   refreshVariables();
   status('idle');
+  return report;
 }
 
 async function runOne(id, libError = null) {
   const c = cells.find((x) => x.id === id);
   const m = meta.get(id);
   const n = graph.nodes.get(id);
-  if ((graph.errors.get(id) ?? []).length) { setStatus(id, 'error'); return; }
+  if ((graph.errors.get(id) ?? []).length) {
+    setStatus(id, 'error');
+    return { id, status: 'graph-error', errors: graph.errors.get(id) };
+  }
 
   setStatus(id, 'running');
   status(`running cell ${cells.indexOf(c) + 1}…`);
@@ -258,11 +264,12 @@ async function runOne(id, libError = null) {
     if (libError) {
       m.out.appendChild(div('run-error', `${libError.identifier ?? 'error'}: ${libError.message}`));
       setStatus(id, 'error');
-    } else {
-      setStatus(id, 'ok', 'defined');
+      m.prevDefs = new Set(n.defs);
+      return { id, status: 'error', error: libError.message };
     }
+    setStatus(id, 'ok', 'defined');
     m.prevDefs = new Set(n.defs);
-    return;
+    return { id, status: 'ok', note: 'function definitions installed' };
   }
 
   const pre = document.createElement('pre');
@@ -309,6 +316,15 @@ async function runOne(id, libError = null) {
     setStatus(id, 'ok', `${r.durationMs} ms`);
   }
   m.prevDefs = new Set(n.defs);
+  m.figures = (r.figures ?? []).filter((f) => f.svg).map((f) => f.svg);
+  return {
+    id,
+    status: r.error ? 'error' : 'ok',
+    ms: r.durationMs,
+    stdout: pre.textContent.trim() || undefined,
+    figures: m.figures.length || undefined,
+    error: r.error ? `${r.error.identifier ?? r.error.kind}: ${r.error.message}` : undefined,
+  };
 }
 
 function setStatus(id, s, detail = '') {
@@ -374,26 +390,16 @@ function refreshVariables() {
 
 /* ----------------------------------------------------------- file handling */
 function exportM() {
-  const order = graph.order; // topological → the export runs top-to-bottom in plain MATLAB
-  const script = order
-    .filter((id) => !graph.nodes.get(id).isFunctionCell)
-    .map((id, i) => `%% cell ${i + 1}\n${cells.find((c) => c.id === id).source}`)
-    .join('\n\n');
-  const fns = order
-    .filter((id) => graph.nodes.get(id).isFunctionCell)
-    .map((id) => cells.find((c) => c.id === id).source)
-    .join('\n\n');
-  const text = `% exported by ReRun — cells in dependency order, runs top-to-bottom\n\n${script}${fns ? '\n\n' + fns : ''}\n`;
+  const text = exportNotebook(cells, graph);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-  a.download = 'notebook.m';
+  a.download = 'notebook.rerun.m';
   a.click();
   URL.revokeObjectURL(a.href);
 }
 
 function importM(text) {
-  const parts = text.split(/^\s*%%[^\n]*$/m).map((s) => s.trim()).filter(Boolean);
-  cells = (parts.length ? parts : [text.trim()]).map((source) => ({ id: uid(), source }));
+  cells = parseNotebook(text, uid);
   meta.clear();
   renderAll();
   enqueue(async () => {
@@ -430,5 +436,122 @@ $('reset').addEventListener('click', () => {
   });
 });
 
+/* ------------------------------------------------------- pair ops API
+ * The same verbs the pair MCP server exposes, executed against THIS tab's
+ * live session — pair.js forwards relay frames here. Everything that runs
+ * code goes through enqueue() so agent work serializes with user work. */
+const api = {
+  async notebook() {
+    return {
+      cells: cells.map((c, i) => {
+        const n = graph.nodes.get(c.id);
+        return {
+          id: c.id, page: i + 1, source: c.source,
+          defines: [...n.defs], uses: [...n.uses],
+          isFunctionCell: n.isFunctionCell || undefined,
+          graphErrors: graph.errors.get(c.id) ?? undefined,
+        };
+      }),
+      executionOrder: graph.order,
+      workspace: runner.workspace().map((v) => ({
+        name: v.name, type: v.dtype ?? v.className,
+        shape: v.shape?.join('×'), preview: v.preview?.slice(0, 8),
+      })),
+    };
+  },
+
+  async exec({ code }) {
+    const probe = buildGraph([...cells, { id: '__pad__', source: String(code) }]);
+    const clash = probe.errors.get('__pad__');
+    if (clash?.length) return { refused: clash };
+    return enqueue(async () => {
+      let streamed = '';
+      const r = await runner.exec(String(code), {
+        name: '<scratch>', onStream: ({ text }) => { streamed += text; },
+      });
+      refreshVariables();
+      const displays = (r.displays ?? [])
+        .map((d) => (d.label ? `${d.label} = ${d.text}` : d.text))
+        .filter((t) => t && !streamed.includes(String(t).trim()));
+      return {
+        ok: !r.error,
+        stdout: (streamed + displays.join('\n')).trim(),
+        error: r.error ? `${r.error.identifier ?? r.error.kind}: ${r.error.message}` : undefined,
+        workspace: runner.workspace().map((v) => v.name),
+      };
+    });
+  },
+
+  async apply({ ops }) {
+    const proposed = cells.map((c) => ({ ...c }));
+    const touched = [];
+    const deletedDefs = [];
+    const deletedIds = [];
+    for (const op of ops ?? []) {
+      if (op.kind === 'create') {
+        const c = { id: uid(), source: String(op.source ?? '') };
+        const at = op.after ? proposed.findIndex((x) => x.id === op.after) + 1 : proposed.length;
+        proposed.splice(at < 1 ? proposed.length : at, 0, c);
+        touched.push(c.id);
+      } else if (op.kind === 'edit') {
+        const c = proposed.find((x) => x.id === op.id);
+        if (!c) return { rejected: [`edit: no such cell '${op.id}'`] };
+        c.source = String(op.source ?? '');
+        touched.push(c.id);
+      } else if (op.kind === 'delete') {
+        const i = proposed.findIndex((x) => x.id === op.id);
+        if (i < 0) return { rejected: [`delete: no such cell '${op.id}'`] };
+        deletedIds.push(op.id);
+        deletedDefs.push(...(graph.nodes.get(op.id)?.defs ?? []));
+        proposed.splice(i, 1);
+      } else {
+        return { rejected: [`unknown op kind '${op.kind}'`] };
+      }
+    }
+    const g = buildGraph(proposed);
+    if (g.errors.size) {
+      const rejected = [];
+      for (const [cid, msgs] of g.errors) for (const m of msgs) rejected.push(`cell ${cid}: ${m}`);
+      return { rejected, note: 'batch rejected — notebook unchanged' };
+    }
+    return enqueue(async () => {
+      const oldGraph = graph;
+      const affected = new Set(touched);
+      for (const did of deletedIds) for (const d of oldGraph.descendantsOf(did)) affected.add(d);
+      cells = proposed;
+      for (const did of deletedIds) meta.delete(did);
+      renderAll();
+      if (deletedDefs.length) await runner.exec(`clear ${deletedDefs.join(' ')};`, { name: '<clear>' });
+      for (const id of touched) for (const d of graph.descendantsOf(id)) affected.add(d);
+      const report = await runIds([...affected].filter((id) => cells.some((c) => c.id === id)));
+      save();
+      return { applied: (ops ?? []).length, report, executionOrder: graph.order };
+    });
+  },
+
+  async read_variable({ name, maxElements = 100 }) {
+    try {
+      const v = await session.materializeVariable(
+        { name: String(name) }, { maxElements: Math.min(Number(maxElements) || 100, 4096) });
+      return { name, shape: v?.shape, values: v?.preview?.values, truncated: v?.preview?.truncated };
+    } catch (e) {
+      return { error: String(e?.message ?? e) };
+    }
+  },
+
+  async read_figure({ id }) {
+    const svgs = meta.get(String(id))?.figures;
+    if (!svgs) return { error: `no figures recorded for cell '${id}'` };
+    return { id, count: svgs.length, svgs };
+  },
+
+  async export_m() {
+    return { source: exportNotebook(cells, graph) };
+  },
+};
+
 await boot();
-window.__rerun = { get cells() { return cells; }, get graph() { return graph; }, commit, runner: () => runner };
+window.__rerun = { get cells() { return cells; }, get graph() { return graph; }, commit, runner: () => runner, api };
+
+const { initPair } = await import(/* @vite-ignore */ `./pair.js?v=${document.body.dataset.v ?? ''}`);
+initPair(api);

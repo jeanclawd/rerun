@@ -217,3 +217,21 @@ main {
   .cell-tools { opacity: 1; }
   #status { min-width: 0; }
 }
+
+/* ---- pair ---- */
+#pair.pairing { border-color: var(--accent); color: var(--accent); }
+#pair-banner {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  padding: 0.45rem 1.1rem; font-size: 0.8rem; color: var(--muted);
+  background: var(--accent-soft); border-bottom: 1px solid var(--edge);
+}
+#pair-banner code {
+  font: 11.5px/1.4 var(--mono); color: var(--ink);
+  background: var(--panel); border: 1px solid var(--edge);
+  border-radius: 6px; padding: 0.2rem 0.5rem;
+  overflow-x: auto; max-width: 100%; white-space: nowrap;
+}
+#pair-banner button {
+  background: var(--panel); color: var(--ink); border: 1px solid var(--edge);
+  border-radius: 6px; padding: 0.15rem 0.6rem; cursor: pointer; font-size: 0.75rem;
+}
