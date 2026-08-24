@@ -4,7 +4,7 @@ An experiment: a **marimo-like reactive notebook for the MATLAB language**,
 running entirely in the browser on [RunMat](https://github.com/runmat-org/runmat)'s
 wasm build.
 
-Live (private box): `https://jean-clawd.com/rerun/`
+Live (private box): served under `/rerun/` behind the box's reverse proxy.
 
 ## The idea
 
