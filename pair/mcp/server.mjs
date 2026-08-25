@@ -19,11 +19,12 @@
  *
  * Hand-rolled MCP (no SDK dep) — three methods is all the protocol needs here.
  * Run: node pair/mcp/server.mjs   (RUNMAT_PKG overrides the runtime location)
+ * Bridge auth: --token-file <path> or RERUN_PAIR_TOKEN env var, in preference to --token.
  */
 
 import { createInterface } from 'node:readline';
 import { readFile, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildGraph } from '../../host/dag.js';
@@ -35,13 +36,27 @@ import { exportNotebook, parseNotebook } from '../../host/format.js';
  * relay bridge:        server.mjs --relay wss://…/rerun/pair --session S --token T
  * In bridge mode there is no local session: every tool call is forwarded to
  * the paired browser tab, which executes in ITS live session — the human
- * watches the agent work. */
+ * watches the agent work.
+ *
+ * The token is a bearer credential (exec access to a live session) and the
+ * pairing string is meant to be handed off, so --token on the command line
+ * — argv ends up in shell history and is readable via /proc/<pid>/cmdline —
+ * is the least private option. Prefer --token-file <path> or the
+ * RERUN_PAIR_TOKEN env var; --token is kept for the header's quick-copy
+ * command and one-off use. */
 const ARGS = {};
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i];
   if (a.startsWith('--')) ARGS[a.slice(2)] = process.argv[i + 1]?.startsWith('--') ? true : process.argv[++i];
 }
 const BRIDGE = !!ARGS.relay;
+
+function resolveToken() {
+  if (typeof ARGS.token === 'string') return ARGS.token;
+  if (typeof ARGS['token-file'] === 'string') return readFileSync(ARGS['token-file'], 'utf8').trim();
+  if (process.env.RERUN_PAIR_TOKEN) return process.env.RERUN_PAIR_TOKEN;
+  return null;
+}
 
 /* ------------------------------------------------------- session bootstrap */
 globalThis.self ??= globalThis;
@@ -57,7 +72,16 @@ let runner = null;
 if (!BRIDGE) {
   const PKG = process.env.RUNMAT_PKG ??
     '/root/Projects/runmat-jupyter/host/node_modules/runmat/dist/pkg-web';
-  const web = await import(pathToFileURL(resolve(PKG, 'runmat_wasm_web.js')).href);
+  const entry = resolve(PKG, 'runmat_wasm_web.js');
+  if (!existsSync(entry)) {
+    console.error(`RunMat wasm runtime not found at ${PKG}`);
+    console.error(
+      "Set RUNMAT_PKG to your runmat 'dist/pkg-web' directory " +
+      '(the one containing runmat_wasm_web.js and runmat_wasm_web_bg.wasm).'
+    );
+    process.exit(1);
+  }
+  const web = await import(pathToFileURL(entry).href);
   await web.default({ module_or_path: await readFile(resolve(PKG, 'runmat_wasm_web_bg.wasm')) });
   session = await web.initRunMat({
     enableGpu: false, enableJit: false, telemetryConsent: false,
@@ -326,8 +350,12 @@ const handlers = {
  * native WebSocket client — no dependency. */
 let tabCall = null;
 if (BRIDGE) {
-  if (!ARGS.session || !ARGS.token) {
-    console.error('bridge mode needs --session and --token (shown in the ReRun tab header)');
+  const token = resolveToken();
+  if (!ARGS.session || !token) {
+    console.error(
+      'bridge mode needs --session and a token — pass --token, --token-file <path>, ' +
+      'or set RERUN_PAIR_TOKEN (session/token shown in the ReRun tab header)'
+    );
     process.exit(2);
   }
   const ws = new WebSocket(String(ARGS.relay));
@@ -335,7 +363,7 @@ if (BRIDGE) {
   let wsSeq = 0;
   const ready = new Promise((res, rej) => {
     ws.onopen = () => {
-      ws.send(JSON.stringify({ role: 'agent', session: ARGS.session, token: ARGS.token }));
+      ws.send(JSON.stringify({ role: 'agent', session: ARGS.session, token }));
     };
     ws.onmessage = (ev) => {
       let m;

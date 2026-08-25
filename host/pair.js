@@ -61,7 +61,19 @@ export function initPair(api) {
       try { await navigator.clipboard.writeText(code.textContent); copyFull.textContent = 'copied'; }
       catch { /* visible */ }
     });
-    details.append(summary, code, copyFull);
+    const note = document.createElement('p');
+    note.textContent =
+      '--token puts the credential in shell history and process args. Prefer RERUN_PAIR_TOKEN or --token-file:';
+    const codeEnv = document.createElement('code');
+    codeEnv.textContent =
+      `RERUN_PAIR_TOKEN=${token} claude mcp add rerun-pair -- node pair/mcp/server.mjs --relay ${relay} --session ${sessionId}`;
+    const copyEnv = document.createElement('button');
+    copyEnv.textContent = 'copy';
+    copyEnv.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(codeEnv.textContent); copyEnv.textContent = 'copied'; }
+      catch { /* visible */ }
+    });
+    details.append(summary, code, copyFull, note, codeEnv, copyEnv);
 
     banner.append(label, short, copyShort, details);
     banner.hidden = false;
