@@ -95,7 +95,10 @@ Two modes:
   (`--relay wss://…/rerun/pair --session … --token …`) to the agent: every
   tool call executes in YOUR tab, live — cells appear, plots redraw, and the
   pair button is the kill switch. The relay (`relay/relay.mjs`, systemd
-  `rerun-pair-relay`, Caddy `/rerun/pair`) is a dumb token-gated pipe.
+  `rerun-pair-relay`, Caddy `/rerun/pair`) is a dumb token-gated pipe. The
+  token is a bearer credential, so prefer the header's `RERUN_PAIR_TOKEN=…`
+  form (env var) or `--token-file <path>` over `--token`, which lands in
+  shell history and process args.
 
 Design notes and the research behind this: `docs/PAIR-NOTES.md`.
 
