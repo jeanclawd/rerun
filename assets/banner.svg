@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="rerun">
+  <defs><linearGradient id="wm" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="rgb(59, 130, 246)"/><stop offset="1" stop-color="rgb(168, 85, 247)"/></linearGradient></defs>
+  <rect width="1200" height="300" rx="28" fill="#0d0e12"/>
+  <rect x="1" y="1" width="1198" height="298" rx="27" fill="none" stroke="#262a34"/>
+  <g shape-rendering="crispEdges">
+<rect x="48" y="44" width="26" height="26" rx="4" fill="rgb(59,130,246)"/>
+<rect x="203" y="44" width="26" height="26" rx="4" fill="rgb(102,101,241)"/>
+<rect x="48" y="75" width="26" height="26" rx="4" fill="rgb(68,124,245)"/>
+<rect x="79" y="75" width="26" height="26" rx="4" fill="rgb(76,118,244)"/>
+<rect x="203" y="75" width="26" height="26" rx="4" fill="rgb(110,99,242)"/>
+<rect x="234" y="75" width="26" height="26" rx="4" fill="rgb(119,97,244)"/>
+<rect x="48" y="106" width="26" height="26" rx="4" fill="rgb(76,118,244)"/>
+<rect x="79" y="106" width="26" height="26" rx="4" fill="rgb(85,112,243)"/>
+<rect x="110" y="106" width="26" height="26" rx="4" fill="rgb(93,106,242)"/>
+<rect x="203" y="106" width="26" height="26" rx="4" fill="rgb(119,97,244)"/>
+<rect x="234" y="106" width="26" height="26" rx="4" fill="rgb(128,95,245)"/>
+<rect x="265" y="106" width="26" height="26" rx="4" fill="rgb(136,93,246)"/>
+<rect x="48" y="137" width="26" height="26" rx="4" fill="rgb(85,112,243)"/>
+<rect x="79" y="137" width="26" height="26" rx="4" fill="rgb(93,106,242)"/>
+<rect x="110" y="137" width="26" height="26" rx="4" fill="rgb(102,101,241)"/>
+<rect x="141" y="137" width="26" height="26" rx="4" fill="rgb(110,99,242)"/>
+<rect x="203" y="137" width="26" height="26" rx="4" fill="rgb(128,95,245)"/>
+<rect x="234" y="137" width="26" height="26" rx="4" fill="rgb(136,93,246)"/>
+<rect x="265" y="137" width="26" height="26" rx="4" fill="rgb(143,91,246)"/>
+<rect x="296" y="137" width="26" height="26" rx="4" fill="rgb(149,90,246)"/>
+<rect x="48" y="168" width="26" height="26" rx="4" fill="rgb(93,106,242)"/>
+<rect x="79" y="168" width="26" height="26" rx="4" fill="rgb(102,101,241)"/>
+<rect x="110" y="168" width="26" height="26" rx="4" fill="rgb(110,99,242)"/>
+<rect x="203" y="168" width="26" height="26" rx="4" fill="rgb(136,93,246)"/>
+<rect x="234" y="168" width="26" height="26" rx="4" fill="rgb(143,91,246)"/>
+<rect x="265" y="168" width="26" height="26" rx="4" fill="rgb(149,90,246)"/>
+<rect x="48" y="199" width="26" height="26" rx="4" fill="rgb(102,101,241)"/>
+<rect x="79" y="199" width="26" height="26" rx="4" fill="rgb(110,99,242)"/>
+<rect x="203" y="199" width="26" height="26" rx="4" fill="rgb(143,91,246)"/>
+<rect x="234" y="199" width="26" height="26" rx="4" fill="rgb(149,90,246)"/>
+<rect x="48" y="230" width="26" height="26" rx="4" fill="rgb(110,99,242)"/>
+<rect x="203" y="230" width="26" height="26" rx="4" fill="rgb(149,90,246)"/>
+  </g>
+  <text x="378" y="150" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="72" font-weight="800" fill="url(#wm)">rerun</text>
+  <text x="378" y="196" font-family="Segoe UI, system-ui, sans-serif" font-size="27" fill="#8b91a0">reactive MATLAB notebook on RunMat</text>
+  <text x="380" y="238" font-family="Segoe UI, system-ui, sans-serif" font-size="19" fill="#5a606e">part of the RunMat family</text>
+</svg>

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.svg" width="760" alt="rerun">
+</p>
+
 # ReRun ⟳
 
 An experiment: a **marimo-like reactive notebook for the MATLAB language**,
