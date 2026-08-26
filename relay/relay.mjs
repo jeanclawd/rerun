@@ -24,8 +24,29 @@ const sessions = new Map(); // name -> {token, tab, agent, reapTimer}
 const wss = new WebSocketServer({ port: PORT, maxPayload: MAX_FRAME });
 console.log(`rerun-pair relay on :${PORT}`);
 
+/* Keepalive: without traffic, an idle pairing connection is dropped by the
+ * proxy in front of us (Cloudflare's WebSocket idle timeout is ~100 s), which
+ * looked like the session "rebooting after a few minutes" (issue #4). Ping
+ * every 30 s and terminate only a peer that misses a full interval's pong —
+ * WS ping/pong are control frames the proxy counts as activity, and both the
+ * browser tab and the Node bridge auto-answer pings at the protocol level, so
+ * no client change is needed. Well under the ~100 s proxy window. */
+const HEARTBEAT_MS = 30_000;
+function heartbeat() { this.isAlive = true; }
+const heartbeatTimer = setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) { try { ws.terminate(); } catch { } continue; }
+    ws.isAlive = false;
+    try { ws.ping(); } catch { }
+  }
+}, HEARTBEAT_MS);
+heartbeatTimer.unref?.();
+wss.on('close', () => clearInterval(heartbeatTimer));
+
 wss.on('connection', (ws) => {
   let me = null; // {session, role}
+  ws.isAlive = true;
+  ws.on('pong', heartbeat);
 
   ws.on('message', (data) => {
     let msg;
