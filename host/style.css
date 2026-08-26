@@ -65,7 +65,8 @@ header::after {
   background: var(--grad);
   opacity: 0.9;
 }
-.wordmark { font-size: 1.15rem; font-weight: 400; letter-spacing: -0.01em; }
+.wordmark { font-size: 1.15rem; font-weight: 400; letter-spacing: -0.01em; display: inline-flex; align-items: center; gap: 0.5rem; }
+.wordmark .logo { height: 1.45em; width: auto; display: block; }
 .wordmark b {
   background: var(--grad);
   -webkit-background-clip: text;
