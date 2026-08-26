@@ -15,7 +15,7 @@
 
 import { buildGraph } from './dag.js';
 import { SessionRunner } from './session-core.mjs';
-import { exportNotebook, parseNotebook } from './format.js';
+import { exportNotebook, exportIpynb as buildIpynb, parseNotebook } from './format.js';
 
 const $ = (id) => document.getElementById(id);
 const RUNTIME = '/streamlab/runtime'; // shared 52 MB wasm build, same origin
@@ -317,6 +317,8 @@ async function runOne(id, libError = null) {
   }
   m.prevDefs = new Set(n.defs);
   m.figures = (r.figures ?? []).filter((f) => f.svg).map((f) => f.svg);
+  m.stdout = [...m.out.querySelectorAll('pre.stdout')]
+    .map((p) => p.textContent).join('\n').trim() || undefined;
   return {
     id,
     status: r.error ? 'error' : 'ok',
@@ -398,6 +400,22 @@ function exportM() {
   URL.revokeObjectURL(a.href);
 }
 
+function exportIpynb() {
+  const outputs = new Map();
+  for (const c of cells) {
+    const m = meta.get(c.id);
+    if (m && (m.stdout || (m.figures && m.figures.length))) {
+      outputs.set(c.id, { stdout: m.stdout, figures: m.figures });
+    }
+  }
+  const text = buildIpynb(cells, graph, outputs);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  a.download = 'notebook.ipynb';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 function importM(text) {
   cells = parseNotebook(text, uid);
   meta.clear();
@@ -416,6 +434,7 @@ function status(t) { $('status').textContent = t; }
 $('run-all').addEventListener('click', () => { refreshGraph(); enqueue(() => runIds(graph.order)); });
 $('add-cell').addEventListener('click', () => addCell());
 $('export').addEventListener('click', exportM);
+$('export-ipynb').addEventListener('click', exportIpynb);
 $('import').addEventListener('change', async (e) => {
   const f = e.target.files[0];
   if (f) importM(await f.text());

@@ -36,6 +36,72 @@ export function exportNotebook(cells, graph) {
   ].join('\n').replace(/\n{3,}/g, '\n\n');
 }
 
+/** Split a source string into nbformat `source` lines: each line keeps its
+ * trailing newline except the last. An empty source becomes []. */
+function toSourceLines(source) {
+  const text = String(source).replace(/\s+$/, '');
+  if (!text) return [];
+  const lines = text.split('\n');
+  return lines.map((l, i) => (i < lines.length - 1 ? l + '\n' : l));
+}
+
+/** cells (page order) + graph → a Jupyter nbformat 4 notebook JSON string.
+ *
+ * One code cell per ReRun cell in dependency (topological) order, function
+ * cells last — exactly the ordering exportNotebook uses. `outputs` is an
+ * optional Map/object of cell id → { stdout?: string, figures?: string[] }
+ * (figures are SVG markup); when present, matching cells embed a `stream`
+ * stdout output and a `display_data` image/svg+xml output per figure.
+ * Dependency-free; returns a pretty-printed string. One-way export only. */
+export function exportIpynb(cells, graph, outputs = null) {
+  const byId = new Map(cells.map((c) => [c.id, c]));
+  const scripts = graph.order.filter((id) => !graph.nodes.get(id).isFunctionCell);
+  const fns = graph.order.filter((id) => graph.nodes.get(id).isFunctionCell);
+  const getOut = (id) => {
+    if (!outputs) return null;
+    return typeof outputs.get === 'function' ? outputs.get(id) : outputs[id];
+  };
+  const cellFor = (id) => {
+    const src = byId.get(id);
+    const outs = [];
+    const rec = getOut(id);
+    if (rec) {
+      if (rec.stdout && String(rec.stdout).trim()) {
+        outs.push({
+          output_type: 'stream',
+          name: 'stdout',
+          text: toSourceLines(String(rec.stdout).replace(/\s+$/, '') + '\n'),
+        });
+      }
+      for (const svg of rec.figures ?? []) {
+        if (!svg) continue;
+        outs.push({
+          output_type: 'display_data',
+          data: { 'image/svg+xml': toSourceLines(svg) },
+          metadata: {},
+        });
+      }
+    }
+    return {
+      cell_type: 'code',
+      metadata: {},
+      execution_count: null,
+      outputs: outs,
+      source: toSourceLines(src.source),
+    };
+  };
+  const nb = {
+    cells: [...scripts, ...fns].map(cellFor),
+    metadata: {
+      kernelspec: { name: 'runmat', display_name: 'RunMat', language: 'matlab' },
+      language_info: { name: 'matlab' },
+    },
+    nbformat: 4,
+    nbformat_minor: 5,
+  };
+  return JSON.stringify(nb, null, 2);
+}
+
 /** .m text → [{id, source}] in page order. Accepts plain %%-sectioned files. */
 export function parseNotebook(text, mkId = defaultId) {
   const lines = String(text).split('\n');
