@@ -23,10 +23,13 @@
  */
 
 import { createInterface } from 'node:readline';
-import { readFile, writeFile } from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { readFile, writeFile, unlink } from 'node:fs/promises';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve, dirname, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { tmpdir } from 'node:os';
 import { buildGraph } from '../../host/dag.js';
 import { SessionRunner } from '../../host/session-core.mjs';
 import { exportNotebook, parseNotebook } from '../../host/format.js';
@@ -96,6 +99,10 @@ let cells = [];                    // [{id, source}] page order
 let graph = buildGraph(cells);
 const cellFigures = new Map();     // id -> [svg] from the cell's last run
 const NB_FILE = ARGS.notebook ? resolve(String(ARGS.notebook)) : null;
+// A stable identifier so a harness can tell paired sessions apart: the relay
+// session id in bridge mode, else the notebook filename headless, else a default.
+const TITLE = BRIDGE ? String(ARGS.session ?? 'bridge')
+  : (NB_FILE ? basename(NB_FILE) : 'untitled');
 if (!BRIDGE && NB_FILE && existsSync(NB_FILE)) {
   cells = parseNotebook(await readFile(NB_FILE, 'utf8'));
   graph = buildGraph(cells);
@@ -161,6 +168,8 @@ async function runInOrder(ids) {
 
 function notebookView() {
   return {
+    title: TITLE,
+    session: BRIDGE ? String(ARGS.session ?? '') : undefined,
     cells: cells.map((c, i) => {
       const n = graph.nodes.get(c.id);
       return {
@@ -176,6 +185,50 @@ function notebookView() {
       shape: v.shape?.join('×'), preview: v.preview?.slice(0, 8),
     })),
   };
+}
+
+/* --------------------------------------------------------- SVG → PNG raster
+ * read_figure can hand back a raster instead of SVG, so a phone/chat client
+ * (Telegram shows SVG as a file, PNG as a photo) gets a real preview. We shell
+ * out to the box's headless Chrome — zero new npm deps — writing the SVG to a
+ * temp file and screenshotting it. On any failure the caller falls back to SVG. */
+const execFileP = promisify(execFile);
+const CHROME = process.env.RERUN_CHROME || '/usr/bin/google-chrome';
+
+/** Derive pixel size from the SVG's viewBox or width/height attrs. */
+function svgSize(svg) {
+  const vb = /viewBox\s*=\s*["']\s*[-\d.]+\s+[-\d.]+\s+([\d.]+)\s+([\d.]+)/.exec(svg);
+  if (vb) return { w: Math.round(+vb[1]) || 800, h: Math.round(+vb[2]) || 600 };
+  const w = /\bwidth\s*=\s*["']([\d.]+)/.exec(svg);
+  const h = /\bheight\s*=\s*["']([\d.]+)/.exec(svg);
+  if (w && h) return { w: Math.round(+w[1]) || 800, h: Math.round(+h[1]) || 600 };
+  return { w: 800, h: 600 };
+}
+
+/** Rasterize one SVG string to PNG bytes via headless Chrome. */
+async function svgToPng(svg) {
+  if (!existsSync(CHROME)) return { error: `raster unavailable: ${CHROME} not found` };
+  const { w, h } = svgSize(svg);
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const svgPath = resolve(tmpdir(), `rerun-fig-${stamp}.svg`);
+  const pngPath = resolve(tmpdir(), `rerun-fig-${stamp}.png`);
+  try {
+    await writeFile(svgPath, svg, 'utf8');
+    await execFileP(CHROME, [
+      '--headless=new', '--no-sandbox', '--disable-gpu', '--hide-scrollbars',
+      `--screenshot=${pngPath}`, `--window-size=${w},${h}`,
+      '--default-background-color=00000000', '--virtual-time-budget=2000',
+      pathToFileURL(svgPath).href,
+    ], { timeout: 30_000 });
+    const bytes = await readFile(pngPath);
+    if (!bytes.length) return { error: 'raster produced an empty PNG' };
+    return { base64: bytes.toString('base64'), width: w, height: h };
+  } catch (e) {
+    return { error: `raster failed: ${String(e?.message ?? e)}` };
+  } finally {
+    unlink(svgPath).catch(() => {});
+    unlink(pngPath).catch(() => {});
+  }
 }
 
 /* ------------------------------------------------------------------ tools */
@@ -231,10 +284,13 @@ const TOOLS = [
   },
   {
     name: 'read_figure',
-    description: "SVG of the figure(s) a cell produced on its last run.",
+    description: "The figure(s) a cell produced on its last run. format:'svg' (default) returns SVG markup; format:'png' returns a base64 PNG raster (better for phone/chat preview).",
     inputSchema: {
       type: 'object',
-      properties: { id: { type: 'string', description: 'cell id' } },
+      properties: {
+        id: { type: 'string', description: 'cell id' },
+        format: { type: 'string', enum: ['svg', 'png'], description: "output format, default 'svg'" },
+      },
       required: ['id'],
     },
   },
@@ -324,10 +380,24 @@ const handlers = {
     return { applied: ops.length, report, executionOrder: graph.order };
   },
 
-  async read_figure({ id }) {
+  async read_figure({ id, format = 'svg' }) {
     const svgs = cellFigures.get(String(id));
     if (!svgs) return { error: `no figures recorded for cell '${id}'` };
-    return { id, count: svgs.length, svgs };
+    if (String(format).toLowerCase() !== 'png') return { id, format: 'svg', count: svgs.length, svgs };
+    // rasterize each SVG; on failure fall back to SVG with a note rather than throwing
+    const images = [];
+    for (const svg of svgs) {
+      const r = await svgToPng(svg);
+      if (r.error) return { id, format: 'svg', count: svgs.length, svgs, note: `png unavailable — ${r.error}` };
+      images.push({ image_base64: r.base64, width: r.width, height: r.height });
+    }
+    return {
+      id, format: 'png', count: images.length,
+      images_base64: images.map((im) => im.image_base64),
+      image_base64: images[0]?.image_base64,
+      width: images[0]?.width, height: images[0]?.height,
+      images,
+    };
   },
 
   async read_variable({ name, maxElements = 100 }) {
@@ -369,7 +439,21 @@ if (BRIDGE) {
       let m;
       try { m = JSON.parse(ev.data); } catch { return; }
       if (m.type === 'registered') { res(); return; }
-      if (m.type === 'refused') { rej(new Error(m.reason)); return; }
+      if (m.type === 'refused') {
+        // A relay refusal otherwise reaches the client only as CONNECTION_CLOSED.
+        // Make it diagnosable: a greppable stderr line, an optional state file a
+        // health check can read, and a distinct exit code (3 = refused).
+        const reason = m.reason ?? 'unknown reason';
+        console.error(`PAIR REFUSED: ${reason}`);
+        if (process.env.RERUN_PAIR_STATE) {
+          try {
+            writeFileSync(process.env.RERUN_PAIR_STATE,
+              JSON.stringify({ state: 'refused', reason, session: ARGS.session ?? null, ts: Date.now() }));
+          } catch { /* best-effort */ }
+        }
+        rej(new Error(`PAIR REFUSED: ${reason}`));
+        process.exit(3);
+      }
       if (m.type === 'tab-gone') {
         for (const [, cb] of pendingTab) cb({ error: 'the paired tab disconnected' });
         pendingTab.clear();
@@ -435,6 +519,10 @@ async function handle(msg) {
     try {
       if (tabCall) {
         result = await tabCall(name, args ?? {});
+        // the paired tab has no notion of our session id; stamp it on the view
+        if (name === 'notebook' && result && typeof result === 'object' && !result.error) {
+          result = { title: TITLE, session: String(ARGS.session ?? ''), ...result };
+        }
       } else {
         const fn = handlers[name];
         result = fn ? await fn(args ?? {}) : { error: `unknown tool '${name}'` };
