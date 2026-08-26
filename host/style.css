@@ -6,8 +6,9 @@
   --edge: #e4e4e2;
   --ink: #1c1917;
   --muted: #78716c;
-  --accent: #0d9488;
-  --accent-soft: #ccfbf1;
+  --accent: #6d5cf6;              /* RunMat family blue→purple */
+  --accent-soft: #ece9fe;
+  --grad: linear-gradient(90deg, #3b82f6, #6366f1, #8b5cf6, #a855f7);
   --amber: #b45309;
   --amber-soft: #fef3c7;
   --red: #b91c1c;
@@ -23,8 +24,8 @@
     --edge: #33302c;
     --ink: #e7e5e4;
     --muted: #a8a29e;
-    --accent: #2dd4bf;
-    --accent-soft: #134e4a;
+    --accent: #a78bfa;
+    --accent-soft: #2e2a4d;
     --amber: #fbbf24;
     --amber-soft: #433112;
     --red: #f87171;
@@ -55,9 +56,29 @@ header {
   top: 0;
   z-index: 10;
 }
+/* blue→purple hairline under the header */
+header::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 2px;
+  background: var(--grad);
+  opacity: 0.9;
+}
 .wordmark { font-size: 1.15rem; font-weight: 400; letter-spacing: -0.01em; }
-.wordmark b { color: var(--accent); font-weight: 750; }
-.wordmark .mark { color: var(--accent); }
+.wordmark b {
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 750;
+}
+.wordmark .mark {
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
 .tag { color: var(--muted); font-size: 0.78rem; }
 nav { display: flex; gap: 0.45rem; margin-left: auto; align-items: center; flex-wrap: wrap; }
 nav button, .file-btn {
