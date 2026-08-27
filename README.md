@@ -106,6 +106,26 @@ Two modes:
 
 Design notes and the research behind this: `docs/PAIR-NOTES.md`.
 
+## Signal Lab — real audio/video in, real MATLAB DSP out
+
+Click **🎵 audio** and drop any audio or video file — [ffmpeg.wasm](https://github.com/ffmpegwasm/ffmpeg.wasm)
+(vendored under `vendor/ffmpeg/`, runs in a worker, same-origin, no upload
+anywhere) decodes/transcodes it to a 16-bit PCM WAV in-browser. That lands in
+an in-memory filesystem wired into RunMat via its `fsProvider` hook, so cell 1
+becomes `[x, fs] = audioread('input.wav')` — the real builtin, not a custom
+shim. From there it's genuine MATLAB Signal Processing Toolbox-shaped code:
+`fft`, `pwelch`, `spectrogram`, `fir1`, `filtfilt`, `buttord` all work, so a
+notebook can be a real reactive spectral workbench — edit a filter cutoff in
+one cell, the spectrogram plot two cells down updates. `examples/signal-lab.m`
+is a self-contained (synthesized-tone) starting point.
+
+**💾 export audio** writes a named workspace variable back out as a WAV.
+RunMat has no `audiowrite`, and reading a full array back to JS via
+`materializeVariable` caps at 4096 elements — so instead the export asks
+RunMat to `fwrite` the samples itself (through the same in-memory filesystem),
+and a small WAV header gets stitched onto the raw PCM bytes on the JS side.
+Implementation: `host/signal-lab.mjs`.
+
 ## File format (`.rerun.m`)
 
 A notebook is a valid MATLAB script: `%%` sections in dependency order
