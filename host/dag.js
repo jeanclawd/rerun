@@ -1,4 +1,4 @@
-/* ReRun dependency analysis — MATLAB cells in, a reactive DAG out.
+/* ReRun dependency analysis — `.m` cells in, a reactive DAG out.
  *
  *   analyzeCell(source) -> {defs, uses idents, funcs, isFunctionCell, mutated}
  *   buildGraph(cells)   -> {nodes, edges, order, errors, descendantsOf()}
@@ -12,8 +12,8 @@
  *
  * The analyzer is lexical, not a full parser. That is the same trade
  * marimo makes (Python's ast is easier, but the idea holds): find the names a
- * cell BINDS and the names it READS, and let the graph do the rest. MATLAB's
- * one genuine ambiguity — `x(1)` as indexing vs function call — resolves at
+ * cell BINDS and the names it READS, and let the graph do the rest. The `.m`
+ * language's one genuine ambiguity — `x(1)` as indexing vs function call — resolves at
  * the graph level: the name only creates an edge if some other cell defines
  * it, so builtins fall out naturally.
  */
@@ -33,7 +33,7 @@ const IDENT = /[A-Za-z_]\w*/g;
 /** Strip comments and string literals, preserving code structure.
  *  Strings become empty quotes so identifiers inside them vanish. */
 export function stripNoise(source) {
-  // block comments: lines that are only %{ ... %} (MATLAB requires that)
+  // block comments: lines that are only %{ ... %} (the `.m` language requires that)
   const lines = source.split('\n');
   const kept = [];
   let inBlock = 0;
@@ -168,7 +168,7 @@ export function analyzeCell(source) {
     }
   }
   // a mutated name the cell never plainly assigns still binds it here
-  // (MATLAB autocreates on indexed assignment) — but plain defs own first,
+  // (the `.m` language autocreates on indexed assignment) — but plain defs own first,
   // so buildGraph can tell "defines v" apart from "pokes at cell 1's v".
   const plainDefs = new Set(defs);
   for (const m of mutated) defs.add(m);

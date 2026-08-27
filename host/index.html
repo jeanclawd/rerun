@@ -4,20 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title>ReRun — reactive MATLAB notebook</title>
+  <title>ReRun — reactive .m notebook</title>
   <link rel="stylesheet" href="./style.css?v=__V__">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>⟳</text></svg>">
 </head>
 <body data-v="__V__">
   <header>
     <span class="wordmark"><img class="logo" src="./logo.svg?v=__V__" alt="" aria-hidden="true">Re<b>Run</b></span>
-    <span class="tag">reactive MATLAB · RunMat · in-browser</span>
+    <span class="tag">reactive .m · RunMat · in-browser</span>
     <nav>
       <label class="auto-label" title="rerun dependents automatically as you type">
         <input type="checkbox" id="auto" checked> reactive
       </label>
       <button id="run-all" title="run every cell in dependency order">run all</button>
       <button id="add-cell">+ cell</button>
+      <button id="add-text" title="add a Markdown text cell (not executed)">+ text</button>
       <button id="export" title="download as a plain .m that runs top-to-bottom">export .m</button>
       <button id="export-ipynb" title="download as a Jupyter .ipynb (one-way export)">export .ipynb</button>
       <label class="file-btn">import<input type="file" id="import" accept=".m,text/plain" hidden></label>

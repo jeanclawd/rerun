@@ -1,8 +1,8 @@
-/* ReRun file format v1 — a notebook that IS a valid MATLAB script.
+/* ReRun file format v1 — a notebook that IS a valid `.m` script.
  *
  * Cells are %% sections written in DEPENDENCY order (function cells last, as
- * MATLAB itself requires of scripts), so the file runs top-to-bottom in any
- * MATLAB. Round-trip metadata rides in comments, Pluto.jl-style:
+ * the `.m` language itself requires of scripts), so the file runs top-to-bottom
+ * in any `.m` runtime. Round-trip metadata rides in comments, Pluto.jl-style:
  *
  *   %% ⟳ c7a3f21b
  *   f = 3;
@@ -26,7 +26,7 @@ export function exportNotebook(cells, graph) {
   const section = (id) => `%% ⟳ ${id}\n${byId.get(id).source.replace(/\s+$/, '')}`;
   const pageOrder = cells.map((c) => c.id).join(' ');
   return [
-    '% ReRun notebook — cells in dependency order; runs top-to-bottom in MATLAB.',
+    '% ReRun notebook — cells in dependency order; runs top-to-bottom on the RunMat runtime.',
     '',
     ...scripts.map(section),
     ...fns.map(section),
@@ -143,4 +143,89 @@ export function parseNotebook(text, mkId = defaultId) {
 let n = 0;
 function defaultId() {
   return `m${(++n).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/* ---------------------------------------------------- live-script importer */
+import { parseLiveScript, controlDefaultLiteral } from './livescript.js';
+
+/** Plain-text live-script .m text → ReRun cells `[{id, source, kind}]`.
+ *
+ * Maps the parser's ordered chunks onto ReRun's in-memory cell model — the
+ * SAME shape parseNotebook yields, plus a `kind`:
+ *   - prose/table/equation/image chunks → a `text` cell (Markdown, excluded
+ *     from the DAG — see app.js: text cells are filtered out before buildGraph).
+ *   - code chunks → a `code` cell; each attached control's default value is
+ *     spliced into the code at its `position` so the notebook runs with no
+ *     widgets yet (Phase 1). Standalone `control-ref` chunks are for a linear
+ *     renderer and are skipped here — ReRun reads a code chunk's own `controls`
+ *     list instead. That is the one boundary where ReRun's graph importer and a
+ *     top-to-bottom renderer diverge.
+ *
+ * Consecutive text-like chunks are merged into one prose cell so headings and
+ * their paragraphs stay together. Controls become live widgets in Phase 2. */
+export function importLiveScript(text, mkId = defaultId) {
+  const { chunks, appendix } = parseLiveScript(text);
+  const cells = [];
+  let prose = null; // accumulating markdown for the current text cell
+
+  const flushProse = () => {
+    if (prose && prose.trim()) cells.push({ id: mkId(), source: prose.trim(), kind: 'text' });
+    prose = null;
+  };
+  const addProse = (md) => { prose = prose ? `${prose}\n\n${md}` : md; };
+
+  for (const ch of chunks) {
+    if (ch.kind === 'text') {
+      addProse(ch.align ? `<div align="${ch.align}">\n\n${ch.markdown}\n\n</div>` : ch.markdown);
+    } else if (ch.kind === 'table') {
+      addProse(ch.markdown);
+    } else if (ch.kind === 'equation') {
+      // TODO(#11 Phase 3): render LaTeX. For now show it verbatim as mono.
+      addProse('`' + `$${ch.latex}$` + '`');
+    } else if (ch.kind === 'image-ref') {
+      // TODO(#11 Phase 3): inline embedded appendix images. External ![]() only.
+      addProse(`![${ch.alt}](${ch.url})`);
+    } else if (ch.kind === 'code') {
+      flushProse();
+      cells.push({ id: mkId(), source: spliceControls(ch, appendix), kind: 'code' });
+    }
+    // control-ref chunks: skipped — spliced via the code chunk's own controls.
+  }
+  flushProse();
+  return cells;
+}
+
+/** Splice each control's default value into a code chunk at its position, so
+ *  Phase-1 code runs without widgets. Defensive: only replaces when the
+ *  position falls inside the target line; otherwise the existing literal (the
+ *  control's last saved value) is left untouched, which also runs fine. */
+function spliceControls(codeChunk, appendix) {
+  const lines = codeChunk.code.split('\n');
+  // apply right-to-left within a line so earlier columns keep their indices
+  const byLine = new Map();
+  for (const ctl of codeChunk.controls ?? []) {
+    if (ctl.line == null || !Array.isArray(ctl.position)) continue;
+    if (!byLine.has(ctl.line)) byLine.set(ctl.line, []);
+    byLine.get(ctl.line).push(ctl);
+  }
+  for (const [li, ctls] of byLine) {
+    if (li < 0 || li >= lines.length) continue;
+    ctls.sort((a, b) => b.position[0] - a.position[0]);
+    let line = lines[li];
+    for (const ctl of ctls) {
+      const def = appendix.controls[ctl.id];
+      const lit = def ? controlDefaultLiteral(def.data) : null;
+      const [start, end] = ctl.position;
+      if (lit == null || !(start >= 1 && end >= start && end <= line.length)) continue;
+      line = line.slice(0, start - 1) + lit + line.slice(end);
+    }
+    lines[li] = line;
+  }
+  return lines.join('\n').replace(/\s+$/, '');
+}
+
+/** Heuristic: does this .m text look like a plain-text live script (vs a plain
+ *  or .rerun.m script)? Used to route the import affordance. */
+export function looksLikeLiveScript(text) {
+  return /^%\[(text|control|appendix|output)\b/m.test(String(text));
 }
