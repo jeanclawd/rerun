@@ -16,6 +16,7 @@
 import { buildGraph } from './dag.js';
 import { SessionRunner } from './session-core.mjs';
 import { exportNotebook, exportIpynb as buildIpynb, parseNotebook } from './format.js';
+import { createMemFs, decodeToWav, wavFromPcm16, downloadBytes } from './signal-lab.mjs';
 
 const $ = (id) => document.getElementById(id);
 const RUNTIME = '/streamlab/runtime'; // shared 52 MB wasm build, same origin
@@ -44,6 +45,7 @@ let runner = null;
 let autoRun = true;
 let runChain = Promise.resolve();   // serialize all execution
 let streamTarget = null;            // cell id currently receiving stdout
+const memfs = createMemFs();        // audio files ffmpeg.wasm decodes land here — audioread() reads them
 
 /* ------------------------------------------------------------------- boot */
 async function boot() {
@@ -53,6 +55,7 @@ async function boot() {
   session = await web.initRunMat({
     enableGpu: false, enableJit: false, telemetryConsent: false,
     logLevel: 'error', languageCompat: 'matlab',
+    fsProvider: memfs.fsProvider,
   });
   runner = new SessionRunner(session, { figureWidth: 640, figureHeight: 400 });
   try { await web.subscribeStdout((e) => runner.feedStdout(e)); } catch { /* stdout arrives in results */ }
@@ -416,6 +419,48 @@ function exportIpynb() {
   URL.revokeObjectURL(a.href);
 }
 
+/* ffmpeg.wasm decoded the dropped file to input.wav in memfs; make cell 1
+ * read it with the real audioread builtin. File content changed even when
+ * this text didn't (re-uploading the same-named file), so always force a
+ * full rerun rather than relying on the DAG's text-diff staleness check. */
+function setAudioSourceCell() {
+  const src = "[x, fs] = audioread('input.wav');";
+  const isAudioCell = (s) => s.includes("audioread('input.wav')");
+  if (cells[0] && isAudioCell(cells[0].source)) cells[0].source = src;
+  else cells.unshift({ id: uid(), source: src });
+  renderAll();
+  refreshGraph();
+  enqueue(() => runIds(graph.order));
+}
+
+/* RunMat has no audiowrite, and materializeVariable caps at 4096 elements —
+ * so ask RunMat to fwrite the samples itself (through the same memfs the
+ * fsProvider serves), then wrap the raw PCM bytes in a WAV header here. */
+async function exportAudio() {
+  const name = (prompt('Workspace variable to export as 16-bit PCM WAV:', 'y') ?? '').trim();
+  if (!name) return;
+  status(`exporting ${name}…`);
+  const r = await runner.exec(
+    `fid = fopen('__export.bin','w'); fwrite(fid, ${name}(:), 'int16'); fclose(fid); clear fid;`,
+    { name: '<export>' }
+  );
+  if (r.error) {
+    alert(`export failed: ${r.error.message}`);
+    status('idle');
+    return;
+  }
+  const bytes = memfs.read('__export.bin');
+  if (!bytes) {
+    alert('export failed: no bytes written — is that variable numeric?');
+    status('idle');
+    return;
+  }
+  const fsVar = runner.workspace().find((v) => v.name === 'fs');
+  const sampleRate = Number(fsVar?.preview?.[0]) || 44100;
+  downloadBytes(wavFromPcm16(bytes, { sampleRate }), `${name}.wav`);
+  status('idle');
+}
+
 function importM(text) {
   cells = parseNotebook(text, uid);
   meta.clear();
@@ -440,6 +485,23 @@ $('import').addEventListener('change', async (e) => {
   if (f) importM(await f.text());
   e.target.value = '';
 });
+$('audio-import').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  status(`decoding ${f.name} via ffmpeg…`);
+  let wav;
+  try {
+    wav = await decodeToWav(f);
+  } catch (err) {
+    alert(`ffmpeg decode failed: ${err?.message ?? err}`);
+    status('idle');
+    return;
+  }
+  memfs.write('input.wav', wav);
+  setAudioSourceCell();
+});
+$('audio-export').addEventListener('click', exportAudio);
 $('auto').addEventListener('change', (e) => { autoRun = e.target.checked; });
 $('reset').addEventListener('click', () => {
   if (!confirm('Reset to the demo notebook? Your cells are replaced.')) return;

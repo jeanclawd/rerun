@@ -21,6 +21,8 @@
       <button id="export" title="download as a plain .m that runs top-to-bottom">export .m</button>
       <button id="export-ipynb" title="download as a Jupyter .ipynb (one-way export)">export .ipynb</button>
       <label class="file-btn">import<input type="file" id="import" accept=".m,text/plain" hidden></label>
+      <label class="file-btn" title="decode any audio/video file (via ffmpeg.wasm) into the workspace as x, fs">🎵 audio<input type="file" id="audio-import" accept="audio/*,video/*" hidden></label>
+      <button id="audio-export" title="write a workspace variable to a 16-bit PCM WAV and download it">💾 export audio</button>
       <button id="reset" title="restore the demo notebook">demo</button>
       <button id="pair" title="let an agent drive this notebook while you watch">pair</button>
     </nav>
