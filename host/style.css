@@ -172,6 +172,28 @@ main {
   padding: 0.35rem 0.15rem 0.15rem;
 }
 
+/* text/prose cells: rendered Markdown, not executed */
+.badge.text { background: var(--blue-soft); color: var(--blue); }
+.cell.text-cell { border-style: solid; }
+.cell-md {
+  padding: 0.25rem 0.35rem;
+  font: 14px/1.6 var(--sans, system-ui, sans-serif);
+  color: var(--ink);
+}
+.cell-md > :first-child { margin-top: 0; }
+.cell-md > :last-child { margin-bottom: 0; }
+.cell-md h1 { font-size: 1.5rem; margin: 0.6rem 0 0.4rem; }
+.cell-md h2 { font-size: 1.2rem; margin: 0.5rem 0 0.35rem; }
+.cell-md h3 { font-size: 1.05rem; margin: 0.5rem 0 0.3rem; }
+.cell-md p { margin: 0.4rem 0; }
+.cell-md ul, .cell-md ol { margin: 0.4rem 0; padding-left: 1.4rem; }
+.cell-md code { font: 0.85em var(--mono); background: var(--bg); padding: 0.05rem 0.3rem; border-radius: 5px; }
+.cell-md a { color: var(--accent); }
+.cell-md img { max-width: 100%; height: auto; }
+.cell-md table { border-collapse: collapse; margin: 0.5rem 0; font-size: 0.9rem; }
+.cell-md th, .cell-md td { border: 1px solid var(--edge); padding: 0.25rem 0.6rem; text-align: left; }
+.cell-md th { background: var(--bg); }
+
 .graph-error {
   background: var(--red-soft); color: var(--red);
   border-radius: 7px; padding: 0.35rem 0.65rem;

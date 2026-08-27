@@ -15,7 +15,12 @@
 
 import { buildGraph } from './dag.js';
 import { SessionRunner } from './session-core.mjs';
-import { exportNotebook, exportIpynb as buildIpynb, parseNotebook } from './format.js';
+import { exportNotebook, exportIpynb as buildIpynb, parseNotebook, importLiveScript, looksLikeLiveScript } from './format.js';
+
+/* Text/prose cells (kind: 'text') hold Markdown, render statically, and are
+ * NOT executed — they are filtered out before buildGraph so the DAG analyzer
+ * (dag.js) never sees them and stays code-only. Everything else is a code cell. */
+const isText = (c) => c && c.kind === 'text';
 
 const $ = (id) => document.getElementById(id);
 const RUNTIME = '/streamlab/runtime'; // shared 52 MB wasm build, same origin
@@ -57,7 +62,7 @@ async function boot() {
   runner = new SessionRunner(session, { figureWidth: 640, figureHeight: 400 });
   try { await web.subscribeStdout((e) => runner.feedStdout(e)); } catch { /* stdout arrives in results */ }
 
-  cells = load() ?? DEMO;
+  cells = (await loadFromUrl()) ?? load() ?? DEMO;
   renderAll();
   status('ready');
   enqueue(() => runIds(graph.order));   // first full run, topological
@@ -65,16 +70,35 @@ async function boot() {
 
 /* ------------------------------------------------------------ persistence */
 function save() {
-  try { localStorage.setItem(STORE, JSON.stringify(cells.map((c) => c.source))); } catch { }
+  try {
+    localStorage.setItem(STORE, JSON.stringify(
+      cells.map((c) => ({ source: c.source, kind: c.kind || 'code' }))));
+  } catch { }
 }
 function load() {
   try {
     const raw = localStorage.getItem(STORE);
     if (!raw) return null;
-    const sources = JSON.parse(raw);
-    if (!Array.isArray(sources) || !sources.length) return null;
-    return sources.map((source) => ({ id: uid(), source }));
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr) || !arr.length) return null;
+    return arr.map((e) => (typeof e === 'string'
+      ? { id: uid(), source: e, kind: 'code' }            // pre-text-cell format
+      : { id: uid(), source: e.source, kind: e.kind || 'code' }));
   } catch { return null; }
+}
+
+/* Entry point mirroring the .rerun.m load path: ?livescript=<url> imports a
+ * plain-text live-script .m; ?notebook=<url> loads a .rerun.m. Both are
+ * fetched same-origin and fall back silently to localStorage/DEMO on failure. */
+async function loadFromUrl() {
+  try {
+    const q = new URL(location.href).searchParams;
+    const lsUrl = q.get('livescript') || q.get('ls');
+    const nbUrl = q.get('notebook') || q.get('nb');
+    if (lsUrl) return importLiveScript(await (await fetch(lsUrl)).text(), uid);
+    if (nbUrl) return parseNotebook(await (await fetch(nbUrl)).text(), uid);
+  } catch (e) { console.error('url load:', e); }
+  return null;
 }
 
 /* -------------------------------------------------------------- rendering */
@@ -109,6 +133,8 @@ function cellDom(c) {
   }
   head.append(num, badges, st, tools);
 
+  if (isText(c)) return textCellDom(c, root, head, num, badges, st);
+
   const ta = document.createElement('textarea');
   ta.value = c.source;
   ta.spellcheck = false;
@@ -138,9 +164,89 @@ function cellDom(c) {
   return root;
 }
 
+/* A text/prose cell: rendered Markdown, double-click to edit the raw source in
+ * a textarea, blur to re-render. Not executed; kept out of the DAG. */
+function textCellDom(c, root, head, num, badges, st) {
+  root.classList.add('text-cell');
+  const view = div('cell-md');
+  view.innerHTML = renderMarkdown(c.source);
+  const ta = document.createElement('textarea');
+  ta.className = 'cell-md-edit';
+  ta.value = c.source; ta.spellcheck = false; ta.hidden = true;
+  view.title = 'double-click to edit';
+  view.addEventListener('dblclick', () => { view.hidden = true; ta.hidden = false; grow(ta); ta.focus(); });
+  ta.addEventListener('input', () => { c.source = ta.value; grow(ta); save(); });
+  ta.addEventListener('blur', () => {
+    view.innerHTML = renderMarkdown(c.source); view.hidden = false; ta.hidden = true;
+  });
+  root.append(head, view, ta);
+  meta.set(c.id, { root, num, badges, st, view, ta, isText: true });
+  requestAnimationFrame(() => grow(ta));
+  return root;
+}
+
 function grow(ta) {
   ta.style.height = 'auto';
   ta.style.height = ta.scrollHeight + 2 + 'px';
+}
+
+/* --------------------------------------------------------- markdown (text cells)
+ * A deliberately small block+inline Markdown renderer — no external library
+ * (CSP-safe). Handles headings, lists, tables, links, bold/italic/mono, the
+ * live-script <u> and <div align> passthrough, and images. HTML is escaped
+ * before inline formatting so imported prose can't inject markup.
+ * TODO(#11 Phase 3): LaTeX equations and inline embedded images. */
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function escAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
+function inlineMd(s) {
+  return escapeHtml(s)
+    .replace(/`([^`]+)`/g, (_, x) => `<code>${x}</code>`)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/&lt;u&gt;/g, '<u>').replace(/&lt;\/u&gt;/g, '</u>');
+}
+function renderTableMd(rows) {
+  const cellsOf = (r) => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((x) => x.trim());
+  let h = '<table><thead><tr>';
+  h += cellsOf(rows[0]).map((x) => `<th>${inlineMd(x)}</th>`).join('') + '</tr></thead><tbody>';
+  for (let r = 2; r < rows.length; r++) {
+    h += '<tr>' + cellsOf(rows[r]).map((x) => `<td>${inlineMd(x)}</td>`).join('') + '</tr>';
+  }
+  return h + '</tbody></table>';
+}
+function renderMarkdown(md) {
+  const lines = String(md).split('\n');
+  let html = '', i = 0, list = null;
+  const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
+  const isBlockStart = (t) => /^(#{1,6}\s|[-*]\s|\d+\.\s|\|)/.test(t) || /^<\/?div\b/.test(t) || /^!\[/.test(t);
+  while (i < lines.length) {
+    const t = lines[i].trim();
+    if (/^<\/?div\b[^>]*>$/.test(t)) { closeList(); html += t.replace(/[^<>="/\w\s-]/g, ''); i++; continue; }
+    if (t === '') { closeList(); i++; continue; }
+    if (/^\|.*\|$/.test(t)) {
+      closeList();
+      const rows = [];
+      while (i < lines.length && /^\|.*\|$/.test(lines[i].trim())) { rows.push(lines[i].trim()); i++; }
+      html += renderTableMd(rows); continue;
+    }
+    const h = t.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { closeList(); const l = h[1].length; html += `<h${l}>${inlineMd(h[2])}</h${l}>`; i++; continue; }
+    const ul = t.match(/^[-*]\s+(.*)$/);
+    if (ul) { if (list !== 'ul') { closeList(); html += '<ul>'; list = 'ul'; } html += `<li>${inlineMd(ul[1])}</li>`; i++; continue; }
+    const ol = t.match(/^\d+\.\s+(.*)$/);
+    if (ol) { if (list !== 'ol') { closeList(); html += '<ol>'; list = 'ol'; } html += `<li>${inlineMd(ol[1])}</li>`; i++; continue; }
+    const img = t.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (img) { closeList(); html += `<p><img alt="${escAttr(img[1])}" src="${escAttr(img[2])}"></p>`; i++; continue; }
+    closeList();
+    const para = [lines[i]]; i++;
+    while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i].trim())) { para.push(lines[i]); i++; }
+    html += `<p>${inlineMd(para.join(' '))}</p>`;
+  }
+  closeList();
+  return html;
 }
 
 function div(cls, text) {
@@ -152,11 +258,16 @@ function div(cls, text) {
 
 /** Rebuild the DAG and refresh numbers, badges, and graph-error banners. */
 function refreshGraph() {
-  graph = buildGraph(cells);
+  graph = buildGraph(cells.filter((c) => !isText(c)));  // text cells stay out of the DAG
   cells.forEach((c, i) => {
     const m = meta.get(c.id);
-    const n = graph.nodes.get(c.id);
     m.num.textContent = String(i + 1);
+    if (isText(c)) {
+      m.badges.innerHTML = '';
+      m.badges.appendChild(span('badge text', '¶ text'));
+      return;
+    }
+    const n = graph.nodes.get(c.id);
     m.badges.innerHTML = '';
     if (n.isFunctionCell) m.badges.appendChild(span('badge fn', `ƒ ${[...n.funcs].join(', ')}`));
     else if (n.defs.size) m.badges.appendChild(span('badge def', `→ ${[...n.defs].join(', ')}`));
@@ -167,7 +278,7 @@ function refreshGraph() {
     m.root.classList.toggle('has-graph-error', errs.length > 0);
   });
   $('dag-stat').textContent =
-    `${cells.length} cells · ${[...graph.nodes.values()].reduce((s, n) => s + n.deps.size, 0)} edges`;
+    `${graph.nodes.size} cells · ${[...graph.nodes.values()].reduce((s, n) => s + n.deps.size, 0)} edges`;
   save();
 }
 
@@ -345,6 +456,13 @@ function addCell(afterId = null) {
   meta.get(c.id).ta.focus();
 }
 
+function addTextCell(afterId = null) {
+  const c = { id: uid(), source: '# text\n\ndouble-click to edit', kind: 'text' };
+  const i = afterId ? cells.findIndex((x) => x.id === afterId) + 1 : cells.length;
+  cells.splice(i, 0, c);
+  renderAll();
+}
+
 function removeCell(id) {
   const wasDefs = [...(graph.nodes.get(id)?.defs ?? [])];
   const downstream = graph.descendantsOf(id);
@@ -417,7 +535,9 @@ function exportIpynb() {
 }
 
 function importM(text) {
-  cells = parseNotebook(text, uid);
+  // one import affordance handles both: a plain-text live-script .m routes to
+  // the live-script importer, a .rerun.m / plain %%-file to parseNotebook.
+  cells = looksLikeLiveScript(text) ? importLiveScript(text, uid) : parseNotebook(text, uid);
   meta.clear();
   renderAll();
   enqueue(async () => {
@@ -433,6 +553,7 @@ function status(t) { $('status').textContent = t; }
 
 $('run-all').addEventListener('click', () => { refreshGraph(); enqueue(() => runIds(graph.order)); });
 $('add-cell').addEventListener('click', () => addCell());
+$('add-text').addEventListener('click', () => addTextCell());
 $('export').addEventListener('click', exportM);
 $('export-ipynb').addEventListener('click', exportIpynb);
 $('import').addEventListener('change', async (e) => {
@@ -464,6 +585,7 @@ const api = {
     return {
       cells: cells.map((c, i) => {
         const n = graph.nodes.get(c.id);
+        if (!n) return { id: c.id, page: i + 1, source: c.source, kind: 'text' };
         return {
           id: c.id, page: i + 1, source: c.source,
           defines: [...n.defs], uses: [...n.uses],
@@ -480,7 +602,7 @@ const api = {
   },
 
   async exec({ code }) {
-    const probe = buildGraph([...cells, { id: '__pad__', source: String(code) }]);
+    const probe = buildGraph([...cells.filter((c) => !isText(c)), { id: '__pad__', source: String(code) }]);
     const clash = probe.errors.get('__pad__');
     if (clash?.length) return { refused: clash };
     return enqueue(async () => {
@@ -527,7 +649,7 @@ const api = {
         return { rejected: [`unknown op kind '${op.kind}'`] };
       }
     }
-    const g = buildGraph(proposed);
+    const g = buildGraph(proposed.filter((c) => !isText(c)));
     if (g.errors.size) {
       const rejected = [];
       for (const [cid, msgs] of g.errors) for (const m of msgs) rejected.push(`cell ${cid}: ${m}`);
