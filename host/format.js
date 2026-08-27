@@ -1,8 +1,8 @@
-/* ReRun file format v1 — a notebook that IS a valid MATLAB script.
+/* ReRun file format v1 — a notebook that IS a valid `.m` script.
  *
  * Cells are %% sections written in DEPENDENCY order (function cells last, as
- * MATLAB itself requires of scripts), so the file runs top-to-bottom in any
- * MATLAB. Round-trip metadata rides in comments, Pluto.jl-style:
+ * the `.m` language itself requires of scripts), so the file runs top-to-bottom
+ * in any `.m` runtime. Round-trip metadata rides in comments, Pluto.jl-style:
  *
  *   %% ⟳ c7a3f21b
  *   f = 3;
@@ -26,7 +26,7 @@ export function exportNotebook(cells, graph) {
   const section = (id) => `%% ⟳ ${id}\n${byId.get(id).source.replace(/\s+$/, '')}`;
   const pageOrder = cells.map((c) => c.id).join(' ');
   return [
-    '% ReRun notebook — cells in dependency order; runs top-to-bottom in MATLAB.',
+    '% ReRun notebook — cells in dependency order; runs top-to-bottom on the RunMat runtime.',
     '',
     ...scripts.map(section),
     ...fns.map(section),

@@ -36,9 +36,9 @@ const DASHES = { solid: null, dash: "8 5", dot: "2 4", dashdot: "8 4 2 4", none:
 
 // RunMat 0.6.1 does not cycle colors: every default-styled series in an axes
 // gets the SAME color (line family [0.35,0.78,0.48], scatter [0,0.4,0.8]), so
-// `plot(a); hold on; plot(b)` is indistinguishable. MATLAB cycles its
+// `plot(a); hold on; plot(b)` is indistinguishable. The `.m` language cycles its
 // ColorOrder. When two or more series in one axes share an engine default,
-// re-color them (and their legend swatches) with MATLAB's ColorOrder — an
+// re-color them (and their legend swatches) with the `.m` language's ColorOrder — an
 // explicit user color ('r', RGB triplet) never matches a default and is left
 // alone. Disable with options.cycleDefaults = false.
 const ENGINE_DEFAULTS = [
@@ -83,7 +83,7 @@ function cycleDefaultColors(fig) {
 // RunMat populates `legendEntries` for every series whether or not the script
 // called `legend()`, and `legendEnabled` is true either way — so the scene
 // carries no signal for "a legend was actually requested" (see
-// ../issues/10-figure-scene-export-gaps.md). MATLAB only draws one when asked.
+// ../issues/10-figure-scene-export-gaps.md). The `.m` language only draws one when asked.
 // Heuristic: a single series whose label is one of RunMat's auto-generated
 // defaults tells the reader nothing, so suppress it; anything else is kept.
 const AUTO_LABEL = /^(series \d+|data|frequency|count|y|z|__\w+)$/i;
@@ -97,7 +97,7 @@ const DEFAULT_OPTIONS = {
   // match its own palette: {figure, axes, frame, grid, text, muted,
   // legendFill, legendStroke}. Any subset is fine.
   palette: null,
-  // A scene's own metadata.position carries MATLAB's figure size; honour it
+  // A scene's own metadata.position carries the `.m` language's figure size; honour it
   // unless the caller pins width/height explicitly.
   useScenePosition: true,
 };
@@ -232,7 +232,7 @@ function computeExtent(plots, meta) {
   let [xmin, xmax] = fix(ext.xmin, ext.xmax);
   let [ymin, ymax] = fix(ext.ymin, ext.ymax);
 
-  // MATLAB fits x tightly and pads y a little. Pad in log space on a log axis,
+  // the `.m` language fits x tightly and pads y a little. Pad in log space on a log axis,
   // otherwise the padding can push the lower bound to or past zero.
   if (meta?.yLog) {
     if (ymin > 0 && ymax > 0) {
@@ -302,7 +302,7 @@ function drawPlot(p, sx, sy, ax, opt, theme) {
   const pts = () => {
     const acc = [];
     for (let i = 0; i < Math.min(xs.length, ys.length); i++) {
-      if (!isFinitePair(xs[i], ys[i])) continue;               // NaN breaks the line in MATLAB
+      if (!isFinitePair(xs[i], ys[i])) continue;               // NaN breaks the line in the `.m` language
       const px = sx(xs[i]), py = sy(ys[i]);
       if (Number.isFinite(px) && Number.isFinite(py)) acc.push([px, py]);
     }
@@ -464,7 +464,7 @@ function drawPie(p, ax, opt, theme) {
   const cx = ax.x + ax.w / 2, cy = ax.y + ax.h / 2;
   const r = Math.min(ax.w, ax.h) / 2 - 28;
   const out = [];
-  let angle = -Math.PI / 2; // MATLAB starts at 12 o'clock, going clockwise
+  let angle = -Math.PI / 2; // the `.m` language starts at 12 o'clock, going clockwise
   for (let i = 0; i < values.length; i++) {
     const frac = values[i] / total;
     const sweep = frac * Math.PI * 2;
@@ -488,7 +488,7 @@ function drawPie(p, ax, opt, theme) {
 
 /**
  * Pick the corner holding the fewest plotted points, so the legend covers as
- * little data as possible — MATLAB's "best" location, crudely.
+ * little data as possible — the `.m` language's "best" location, crudely.
  */
 function bestCorner(plots, sx, sy, ax, w, h) {
   const boxes = {
@@ -651,7 +651,7 @@ export function renderFigureScene(scene, options = {}) {
   if (!fig || !Array.isArray(fig.plots)) throw new TypeError("not a RunMat figure scene");
   if (opt.cycleDefaults !== false) cycleDefaultColors(fig);
 
-  // MATLAB's figure position is [x y w h]; use it as the default canvas size.
+  // the `.m` language's figure position is [x y w h]; use it as the default canvas size.
   const pos = fig.metadata?.position;
   if (opt.useScenePosition && Array.isArray(pos) && pos.length === 4 && options.width === undefined && options.height === undefined) {
     if (pos[2] > 40 && pos[3] > 40) { opt.width = Math.round(pos[2]); opt.height = Math.round(pos[3]); }
@@ -697,7 +697,7 @@ export function renderFigureScene(scene, options = {}) {
     ? `<text x="${num(opt.width / 2)}" y="${num(opt.fontSize + 6)}" font-size="${opt.titleFontSize + 1}" font-weight="600" fill="${theme.text}" text-anchor="middle">${esc(sgTitle)}</text>`
     : "";
 
-  // The scene's own background is MATLAB's white; honour it only when the
+  // The scene's own background is the `.m` language's white; honour it only when the
   // caller has not asked for a theme or palette of its own.
   const themed = opt.theme === "dark" || opt.palette;
   const bg = themed ? theme.figure : rgba(fig.metadata?.backgroundRgba, theme.figure);

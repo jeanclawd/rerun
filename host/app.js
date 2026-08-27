@@ -1,4 +1,4 @@
-/* ReRun — a reactive MATLAB notebook on RunMat, marimo-style.
+/* ReRun — a reactive `.m` notebook on RunMat, marimo-style.
  *
  * One persistent wasm session holds the workspace. Cells form a dependency
  * DAG (dag.js); running a cell runs it and its transitive dependents in

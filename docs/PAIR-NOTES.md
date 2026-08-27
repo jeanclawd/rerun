@@ -2,7 +2,7 @@
 
 *2026-08-23. Working notes toward a marimo-pair-like agent integration for
 ReRun: an agent CLI (Claude Code first) collaborating on a live reactive
-MATLAB notebook. One thing IS built: the pair-over-MCP prototype of §7
+`.m` notebook. One thing IS built: the pair-over-MCP prototype of §7
 (`pair/mcp/`, 9/9 e2e). Issues will be cut from §9 once Yann picks an MVP.*
 
 ---
@@ -119,13 +119,13 @@ distribution story.
 
 ### Second structural difference: the language of the scratchpad
 marimo's agent writes *Python in a Python kernel* — inspection code is
-arbitrarily expressive. Our scratchpad is MATLAB in RunMat, which is fine for
+arbitrarily expressive. Our scratchpad is `.m` code in RunMat, which is fine for
 data inspection (`size(x)`, `x(1:5)`, `fieldnames(s)`) but the *notebook
-manipulation API* can't live inside MATLAB the way `marimo._code_mode` lives
+manipulation API* can't live inside the `.m` language the way `marimo._code_mode` lives
 inside Python (RunMat can't call back into the app). So ReRun pair needs a
 **two-verb protocol** rather than marimo's one-verb elegance:
 
-- `exec` — scratchpad MATLAB in the live session (observe)
+- `exec` — scratchpad `.m` code in the live session (observe)
 - `apply` — a batched cell-ops transaction (act)
 
 That's still v2-shaped (the runtime validates; scratch is traceless), just
@@ -294,7 +294,7 @@ function install). Five tools:
 | tool            | verb it implements |
 | ---             | --- |
 | `notebook`      | hello — cells with defines/uses, execution order, workspace previews |
-| `exec`          | scratchpad MATLAB, notebook vars in scope, **refuses assigning a notebook-owned name** (a guard marimo doesn't have) |
+| `exec`          | scratchpad `.m` code, notebook vars in scope, **refuses assigning a notebook-owned name** (a guard marimo doesn't have) |
 | `apply`         | transactional batch (create/edit/delete); whole batch validated by `buildGraph` first, any violation → rejected untouched; success → changed cells + descendants rerun, per-cell report |
 | `read_variable` | lazy materialization beyond previews |
 | `export_m`      | the dependency-ordered plain-`.m` artifact |
@@ -335,18 +335,18 @@ agent explored, not just what it committed" is a feature nobody has.
 Two known costs before believing in it: (1) Rerun's viewer is immediate-mode
 egui on canvas — no DOM, no text selection, no CSS — so it must be a
 side-by-side panel, never the inline cell renderer (decide early, expensive
-to reverse); (2) MATLAB plotting is stateful/imperative (`figure`, `hold on`)
+to reverse); (2) `.m`-language plotting is stateful/imperative (`figure`, `hold on`)
 vs Rerun's declarative entity logging — the shim is real work.
 
 ### Naming (also from Yann's notes — name the system, not the feature)
 
-MATLAB's own vocabulary gives the family for free:
+The `.m` language's own vocabulary gives the family for free:
 
-- **`hold on`** — pair mode. MATLAB's "add to the existing plot without
+- **`hold on`** — pair mode. The `.m` language's "add to the existing plot without
   erasing it," which is precisely human-and-agent-on-one-canvas. The one.
 - **`diary`** — the recording layer. Already means "the record of everything
-  that happened" in MATLAB.
-- **`keyboard`** — the agent's live-workspace access; MATLAB's command for
+  that happened" in the `.m` language.
+- **`keyboard`** — the agent's live-workspace access; the `.m` language's command for
   dropping into the workspace mid-execution.
 
 `hold on` + `diary` reads like it was always part of the language.
@@ -362,7 +362,7 @@ notebook load/save (`.rerun.m` from issue #1), figure SVGs returned by a
 tool, register with this box's Claude Code + write the thin etiquette skill.
 Agent-only notebooks; the human reviews via `export_m` or by opening the
 file in ReRun afterwards. Cheapest possible validation of whether pair
-sessions are actually useful for MATLAB work.
+sessions are actually useful for `.m` work.
 *Risk: nobody watches the agent live — the demo magic is missing.*
 
 **Option 2 — the relay: same five verbs, live tab (2–3 days).** §4 Option A:

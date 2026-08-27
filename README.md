@@ -4,7 +4,7 @@
 
 # ReRun ⟳
 
-An experiment: a **marimo-like reactive notebook for the MATLAB language**,
+An experiment: a **marimo-like reactive notebook for the `.m` language**,
 running entirely in the browser on [RunMat](https://github.com/runmat-org/runmat)'s
 wasm build.
 
@@ -16,16 +16,16 @@ Jupyter notebooks lie: run cells out of order, delete one, and the kernel
 remembers things the page no longer says. marimo fixed this for Python by
 making the notebook a **dataflow graph** — every variable is defined by exactly
 one cell, edges are inferred from the code, and editing a cell reruns exactly
-its dependents. ReRun applies the same discipline to MATLAB:
+its dependents. ReRun applies the same discipline to the `.m` language:
 
 - **Cells form a DAG.** A lexical analyzer (`host/dag.js`) extracts which names
   each cell *binds* (assignments, `for` variables, function definitions) and
-  which it *reads*. Reads of another cell's binding become edges. MATLAB's
-  `x(1)`-is-it-indexing-or-a-call ambiguity resolves at the graph level: a name
+  which it *reads*. Reads of another cell's binding become edges. The `.m`
+  language's `x(1)`-is-it-indexing-or-a-call ambiguity resolves at the graph level: a name
   only creates an edge if some cell defines it, so builtins fall out.
 - **Page order is cosmetic.** Execution order is topological. Move cells
   around freely; the export (`.m`) is written in dependency order so it runs
-  top-to-bottom in any MATLAB.
+  top-to-bottom in any `.m` runtime.
 - **Reactive reruns.** Edit a cell (or toggle off `reactive` and hit
   Ctrl+Enter) and it reruns together with its transitive dependents — nothing
   else.
@@ -108,12 +108,43 @@ Design notes and the research behind this: `docs/PAIR-NOTES.md`.
 
 ## File format (`.rerun.m`)
 
-A notebook is a valid MATLAB script: `%%` sections in dependency order
-(function cells last, as MATLAB requires), so it runs top-to-bottom anywhere.
+A notebook is a valid `.m` script: `%%` sections in dependency order
+(function cells last, as the `.m` language requires), so it runs top-to-bottom anywhere.
 Round-trip metadata rides in comments — `%% ⟳ <id>` headers and a
 `% ⟳ page-order:` footer — so ReRun restores the page layout exactly and git
 diffs show one hunk per edited cell. Plain `%%`-sectioned files import fine.
 Implementation: `host/format.js`, shared by the app and the pair server.
+
+## Import a plain-text live script (`.m`)
+
+ReRun can import a **plain-text live-script `.m` document** — prose carried on
+`%[text]` markers, code on bare lines, interactive controls on `%[control:*]`
+markers, an `%[appendix]` block of control data — and turn it into a reactive
+notebook: prose becomes **text cells** (Markdown, rendered, kept out of the
+DAG), code becomes DAG-analyzed **code cells**. The parser is a standalone,
+zero-dependency module (`host/livescript.js`) that emits ordered chunks plus an
+appendix map; the importer (`importLiveScript` in `host/format.js`) maps those
+onto the same in-memory cell model `.rerun.m` uses, so reactive execution, the
+workspace panel, and export all work unchanged.
+
+```bash
+# open one via URL param, alongside the existing ?notebook= path:
+#   /rerun/?livescript=examples/livescript-demo.m
+# or use the header "import" button (it auto-detects live-script vs .rerun.m)
+```
+
+Try `examples/livescript-demo.m` (headings, a paragraph, a table, code cells,
+a figure). This is **Phase 1** of [#11](https://github.com/jeanclawd/rerun/issues/11):
+
+- **Now:** import + static render; each control's default value is spliced into
+  the code so the notebook runs with no widgets.
+- **Phase 2 (stubbed):** `%[control:*]` become live input widgets bound to a
+  variable — a change drives ReRun's reactive rerun of dependents.
+- **Phase 3 (stubbed):** `$…$` LaTeX equations, inline embedded images, and
+  export back to the plain-text live-script format.
+
+`host/livescript.js` is written to consolidate into a shared `runmat-livescript`
+package (also used by streamlab and the VS Code extension).
 
 ## Status / limits (v0.1)
 
@@ -124,3 +155,7 @@ Implementation: `host/format.js`, shared by the app and the pair server.
 - Plain textareas, no syntax highlighting yet.
 - Everything inherits RunMat 0.6.1's compatibility surface — see the
   [runmat-lab](https://github.com/jeanclawd/runmat-lab) compat matrix.
+
+---
+
+RunMat™ is a registered trademark of Dystr, Inc. MATLAB® is a registered trademark of The MathWorks, Inc. ReRun is not affiliated with, endorsed by, or sponsored by Dystr, Inc or The MathWorks, Inc.
